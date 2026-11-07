@@ -448,3 +448,12 @@ independent pass), it sits beside compliance-review and incident-review.
   findings.py) and counted in the report's run facts. After a verdict-changing
   replacement the parent calls `ledger.py decide` again (it now accepts a
   re-decision for a fingerprint already decided).
+- **2026-11-08 pre-release independent verification (of the implementation,
+  first round)**: three verifiers in separate contexts (design conformance /
+  scripts / class fidelity). Findings grouped into nine root-cause classes;
+  the triage is recorded in `docs/en/reviews/2026-11-08-pre-release-verification.md`.
+  The heavy ones: controls still prose (approval, budget, digests, sub-agent
+  tool limits), no cross-check between findings and the ledger (an undecided
+  record reaches the report), places compared by name (an output directory
+  spelled differently is created inside the target). Adopted items are fixed
+  in cut (4).
