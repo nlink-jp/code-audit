@@ -163,7 +163,7 @@
             "additionalProperties": false,
             "properties": {
               "wave": { "type": "integer", "minimum": 1 },
-              "status": { "type": "string", "enum": ["covered", "candidate", "blocked"] },
+              "status": { "type": "string", "enum": ["covered", "candidate", "blocked", "in_progress"] },
               "agent_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
               "reviewed_paths": { "type": "array", "items": { "type": "string" } },
               "checks": { "type": "array", "items": { "type": "object" } },

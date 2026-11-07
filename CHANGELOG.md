@@ -37,10 +37,25 @@
   `git status` and cannot be undefined from the command line; the copy into
   the scratch git-dir follows no symlink, takes regular files only and stops
   at a byte and file budget; `run.py exec` runs the command in its own
-  session and kills the whole process group on timeout. 42 tests.
+  session and kills the whole process group on timeout.
+- Phase 1 cut (2) — hunting classes and the workflow: `classes/generic.md`
+  (nine generic classes) and `classes/mcp-server.md`, `classes/cli.md`,
+  `classes/agent-runtime.md` (52 classes in all), every class citing the
+  knowledge heading or ADR where the organization recorded the lesson
+  (verified against the checkouts with `classes.py check-knowledge`); the
+  six-phase `SKILL.md` — security preamble, guidance vs full audit with one
+  question when ambiguous, four-role reconnaissance that also writes the
+  command ledger and runs the allowed tests once, the human cost gate, the
+  hunter / critic / verifier prompts with their output contracts and
+  negative space, the verifier's reconstruction of preventing layers, and the
+  report step — complete for `quick`, with the `standard`-only sections
+  marked for cut (3). `ledger.py abandon` returns a discarded hunter's units
+  to `planned` with the attempt archived; `compile.py` lists candidates that
+  were never decided, without a verdict; `classes.py` keeps commas inside a
+  cited heading. 49 tests.
 
 ### Planned for 0.1.0
 
-Phase 1 cuts (2) and (3): the generic and three organization hunting-class
-files, and the full six-phase SKILL.md with `quick` / `standard` profiles,
-the cost gate and `--prior` carry-over.
+Phase 1 cut (3): the `standard` profile's later hunting waves, the second
+verification stage with the replacement rule, and `--prior` carry-over wired
+into SKILL.md.

@@ -12,16 +12,19 @@ coverage ledger and a human-approved cost gate. Hunting classes come from the
 organization's recorded defects (MCP servers, CLIs, LLM agent runtimes)
 beside generic classes. Invoked as `/code-audit <target-dir> ...`.
 
-**Status: Phase 1, cut (1) done.** The five bookkeeping scripts, the data
-contracts and their tests exist. SKILL.md is still a placeholder that
-authorizes guidance mode only; the six-phase workflow (cut 2) and the
-standard-profile waves and carry-over wiring in SKILL.md (cut 3) are next.
+**Status: Phase 1, cuts (1) and (2) done.** The five bookkeeping scripts,
+the data contracts, the four hunting-class files (52 classes, every source
+verified against the knowledge checkout and the ADR directory on 2026-11-08)
+and the six-phase SKILL.md exist and are tested for `quick`. Cut (3) — the
+standard profile's later waves, the second verification stage with the
+replacement rule, and `--prior` wiring in SKILL.md — is next; SKILL.md marks
+those sections and tells the parent to run `quick` until then.
 
 ## Key commands
 
 | Command | Purpose |
 |---------|---------|
-| `make check` (= `make test`) | Structural validation + script behaviour tests (39 tests) |
+| `make check` (= `make test`) | Structural validation + script behaviour tests (49 tests) |
 | `make install` | Build the zip and unpack it into `~/.claude/skills/code-audit` |
 | `make install DEST=<path>` | Unpack into a custom skills directory |
 | `make uninstall` | Remove the installed copy |
@@ -33,7 +36,7 @@ Bundled scripts (stdlib-only Python 3.9+; `--help` on each):
 | Script | Subcommands | Owns |
 |--------|-------------|------|
 | `run.py` | `init`, `set-budget`, `count`, `set-status`, `validate`, `exec` | `run-metadata.json`, `checks/<id>.log` |
-| `ledger.py` | `seed [--prior]`, `assign`, `record`, `merge-critic`, `decide`, `defer`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json` (and appends hunter notes to `notes.json`) |
+| `ledger.py` | `seed [--prior]`, `assign`, `record`, `merge-critic`, `decide`, `defer`, `abandon`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json` (and appends hunter notes to `notes.json`) |
 | `findings.py` | `validate`, `add [--replace]`, `note` | `findings.json`, `notes.json` |
 | `compile.py` | (run dir) | `REPORT.ja.md`, `REPORT.md`, `NEEDS-VALIDATION.ja.md`, `NEEDS-VALIDATION.md` |
 | `classes.py` | `list`, `size`, `check-knowledge [--adr]` | nothing; checks `classes/*.md` |
@@ -43,7 +46,8 @@ Bundled scripts (stdlib-only Python 3.9+; `--help` on each):
 ```
 code-audit/
 ├── code-audit/              The skill — the only thing that ships
-│   ├── SKILL.md             Placeholder (guidance mode only) until cut 2
+│   ├── SKILL.md             Security preamble, two modes, the six phases, the three sub-agent contracts
+│   ├── classes/             Hunting classes: generic.md + mcp-server.md, cli.md, agent-runtime.md
 │   ├── schema.json          Parts: metadata, commands, unit_proposal, check, unit, hunter_result,
 │   │                        critic_result, trace_entry, evidence_entry, finding_{confirmed,
 │   │                        needs_validation,rejected}, note
@@ -87,7 +91,7 @@ code-audit/
 | `candidates.json` | `ledger.py` | `candidates` (hunter-proposed, pending), `carried` (from prior runs), `decided`, `suppressed` (prior rejected, same source), `uncovered`, `resolved_prior_leads` |
 | `findings.json` | `findings.py` | decided records, sorted by fingerprint |
 | `notes.json` | `ledger.py record` / `findings.py note` | hardening and out-of-scope notes with the author's agent id |
-| `architecture.md` | the parent | reconnaissance summary |
+| `architecture.md`, `proposals.json`, `agents/<id>.json` | the parent | reconnaissance summary, the unit proposals given to `seed`, the raw return of every sub-agent |
 | `REPORT*.md`, `NEEDS-VALIDATION*.md` | `compile.py` | derived reports |
 
 ## Gotchas
@@ -119,6 +123,25 @@ code-audit/
 - **`decide` requires the record first** (`findings.py add`), then links the
   fingerprint to units; a carried record on a still-planned unit needs
   `--agent` (the verifier becomes the owner).
+- **A discarded hunter result has one exit: `ledger.py abandon`.** It
+  archives the attempt (status `in_progress`, the reason) and returns the
+  agent's units to `planned`; `assign` then refuses that agent, so the unit
+  gets a fresh owner or a `defer`. `defer` itself takes planned units only.
+- **Candidates nobody decided stay in the queue** and `compile.py` lists
+  them under "Candidates not verified" with no verdict and no severity; the
+  parent sets the run `incomplete` when that happens.
+- **Class files**: `## Heading` then a `Source:` line before any body text,
+  citing `doc.md#Heading` (knowledge `docs/en/`) or `ADR-NNN`, several
+  separated by commas — the split happens only before the next reference, so
+  headings may contain commas. Class references elsewhere are
+  `classes/<file>.md#<Heading>` verbatim; a test checks that the fixtures'
+  references resolve to shipped classes and that SKILL.md names every class
+  file. Keep each file under 8 KB (`classes.py size`); the hunter prompt
+  pastes the selected classes verbatim.
+- **SKILL.md's vocabulary is closed**: a test parses every `<script>.py
+  <subcommand>` mention and checks it against the script's `--help`, and
+  another checks that the first paragraph after the title is the security
+  preamble. Rename a subcommand and the test names the stale mention.
 - **Prior-run precedence** when seeding with `--prior`: a record-derived
   status outranks a unit-derived one; among records, confirmed (changed >
   same) > needs_validation > rejected-claim-changed. Same-source confirmed

@@ -102,6 +102,40 @@ class DistributionBoundaryTests(unittest.TestCase):
                 with self.subTest(line=lineno):
                     self.assertTrue(any(s in line for s in OWNING_SCRIPTS), f"SKILL.md:{lineno} names an owned file without its owning script: {line.strip()}")
 
+    def test_skill_md_opens_with_the_security_preamble(self) -> None:
+        body = (SKILL / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[2].strip().splitlines()
+        self.assertTrue(body[0].startswith("# code-audit"), body[0])
+        first = next(line for line in body[1:] if line.strip())
+        self.assertTrue(first.startswith("**SECURITY"), first)
+
+    def test_skill_md_names_only_real_subcommands(self) -> None:
+        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        mentioned: dict[str, set[str]] = {}
+        for script, sub in re.findall(r"\b(run|ledger|findings|classes)\.py ([a-z][a-z-]*)\b", text):
+            mentioned.setdefault(script, set()).add(sub)
+        self.assertTrue({"run", "ledger", "findings", "classes"} <= set(mentioned), mentioned)
+        for script, subs in mentioned.items():
+            help_text = run(f"{script}.py", "--help").stdout
+            m = re.search(r"\{([a-z,-]+)\}", help_text)
+            self.assertIsNotNone(m, help_text)
+            real = set(m.group(1).split(","))  # type: ignore[union-attr]
+            self.assertTrue(subs <= real, f"{script}.py: SKILL.md names {sorted(subs - real)}; real subcommands are {sorted(real)}")
+
+    def test_skill_md_names_every_shipped_class_file(self) -> None:
+        text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        files = sorted(p.name for p in (SKILL / "classes").glob("*.md"))
+        self.assertEqual(files, ["agent-runtime.md", "cli.md", "generic.md", "mcp-server.md"])
+        for name in files:
+            self.assertIn(name, text)
+
+    def test_fixture_class_references_resolve_to_shipped_classes(self) -> None:
+        shipped = {f"classes/{c['file']}#{c['name']}" for c in json.loads(run("classes.py", "list").stdout)}
+        refs = set()
+        for path in FIXTURES.glob("*.json"):
+            refs |= set(re.findall(r"classes/[a-z-]+\.md#[^\"]+", path.read_text(encoding="utf-8")))
+        self.assertTrue(refs, "fixtures reference no class")
+        self.assertTrue(refs <= shipped, sorted(refs - shipped))
+
 
 # ---------------------------------------------------------------------------
 # A full run over the fixture repository
@@ -498,6 +532,22 @@ class LedgerTests(RunFixture):
         self.assertTrue(all(u["status"] == "deferred" and u["unresolved"] for u in self.ledger()))
         self.ok(run("ledger.py", "validate", str(self.run_dir)))
 
+    def test_abandon_returns_units_to_planned_for_a_fresh_owner(self) -> None:
+        self.seed()
+        u1, u2 = self.unit_ids()
+        self.refused(run("ledger.py", "abandon", str(self.run_dir), "--agent", "hunter-1", "--reason", "x"), "owns no in_progress unit")
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1, u2))
+        out = self.ok(run("ledger.py", "abandon", str(self.run_dir), "--agent", "hunter-1", "--reason", "result discarded twice"))
+        self.assertEqual(sorted(out["released"]), sorted([u1, u2]))
+        for u in self.ledger():
+            self.assertEqual((u["status"], u["agent_id"], u["wave"]), ("planned", None, 2))
+            self.assertEqual([a["agent_id"] for a in u["attempts"]], ["hunter-1"])
+            self.assertEqual(u["attempts"][0]["reassignment_reason"], "result discarded twice")
+        self.ok(run("ledger.py", "validate", str(self.run_dir)))
+        self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1), "fresh owner")
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-2", u1))
+        self.ok(run("ledger.py", "defer", str(self.run_dir), "--reason", "budget", u2))
+
 
 class FindingsTests(RunFixture):
     def test_add_decide_and_validate(self) -> None:
@@ -650,6 +700,19 @@ class CompileTests(RunFixture):
         self.assertIn("validation_budget_exhausted", en)
         self.assertIn("No confirmed findings.", en)
 
+    def test_unverified_candidates_are_listed_without_a_verdict(self) -> None:
+        self.hunt()
+        self.ok(run("run.py", "set-status", str(self.run_dir), "incomplete", "--reason", "verification_incomplete"))
+        self.ok(run("compile.py", str(self.run_dir)))
+        en = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
+        ja = (self.run_dir / "REPORT.ja.md").read_text(encoding="utf-8")
+        self.assertIn("No confirmed findings.", en)
+        self.assertIn("### Candidates not verified (no verdict, no severity)", en)
+        self.assertIn("### 検証に至らなかった候補（判定なし・深刻度なし）", ja)
+        for text in (en, ja):
+            self.assertIn("- `app/files.py:read_user_file:path-traversal`: Path traversal in read_user_file", text)
+            self.assertNotIn("| high |", text)
+
 
 class ClassesTests(unittest.TestCase):
     def test_list_parses_headings_and_sources(self) -> None:
@@ -691,6 +754,25 @@ class ClassesTests(unittest.TestCase):
             self.skipTest("classes/ not written yet (Phase 1 cut 2)")
         proc = run("classes.py", "size", "--classes", str(shipped))
         self.assertEqual(proc.returncode, 0, proc.stderr)
+        classes = json.loads(run("classes.py", "list", "--classes", str(shipped)).stdout)
+        self.assertGreaterEqual(len(classes), 40)
+        self.assertTrue(all(c["sources"] for c in classes), [c["name"] for c in classes if not c["sources"]])
+        generic = {c["name"] for c in classes if c["file"] == "generic.md"}
+        self.assertTrue({"Injection", "Access control", "Resource and file handling", "Cryptography and secrets", "Business logic", "Feature abuse", "Chained", "Wildcard", "Obvious things"} <= generic, generic)
+    def test_source_split_keeps_commas_inside_headings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            classes = Path(tmp) / "classes"
+            classes.mkdir()
+            (classes / "x.md").write_text(
+                "## Comma class\nSource: security.md#Compare places by identity, not by name, on this disk, ADR-021, security.md#A check that refuses places must not write to test them\n\nbody\n",
+                encoding="utf-8",
+            )
+            out = json.loads(run("classes.py", "list", "--classes", str(classes)).stdout)
+            self.assertEqual(out[0]["sources"], ["security.md#Compare places by identity, not by name, on this disk", "ADR-021", "security.md#A check that refuses places must not write to test them"])
+            proc = run("classes.py", "check-knowledge", "--classes", str(classes), "--knowledge", str(FIXTURES / "knowledge"), "--adr", str(FIXTURES / "adr"))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["sources_checked"], 3)
+
 
 
 if __name__ == "__main__":

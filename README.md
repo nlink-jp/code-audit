@@ -5,10 +5,11 @@ vulnerabilities that actually cross a trust boundary, and shows what was
 covered in a ledger. Design: the [RFP](docs/en/code-audit-rfp.md)
 (Japanese primary: [RFP (ja)](docs/ja/code-audit-rfp.ja.md)).
 
-> **Status: under construction.** The bookkeeping scripts and data contracts
-> exist and are tested; the audit workflow in SKILL.md is not written yet.
-> Loading the skill authorizes guidance mode only (security questions,
-> focused reviews); the full audit workflow arrives with v0.1.0.
+> **Status: under construction.** The bookkeeping scripts, the data
+> contracts, the hunting classes and the six-phase workflow of SKILL.md exist
+> and are tested for the `quick` profile. The `standard` profile's later
+> hunting waves, second verification stage and `--prior` carry-over are the
+> next cut; SKILL.md says so and runs `quick` until then. v0.1.0 ships both.
 
 **What it will do.** The parent agent runs six phases over isolated
 sub-agents: reconnaissance; coverage-led hunting waves; adversarial validation
@@ -52,7 +53,7 @@ That builds the release zip and unpacks *that*, so what you run is what a
 release ships. `make install DEST=/path/to/skills` installs elsewhere;
 `make uninstall` removes it.
 
-## Usage (planned)
+## Usage
 
 ```
 /code-audit <target-dir> [--output <dir>] [--profile quick|standard]
@@ -64,6 +65,22 @@ claude.ai chat surface the skill answers in guidance mode. Artifacts go to a
 directory you choose, by default `~/code-audit-runs/<repo>/run-<N>`, never
 inside the target. See the RFP for the artifact layout and the execution
 boundary.
+
+The six phases: reconnaissance by four read-only roles (product and runnable
+commands; principals and defences; entry points and sinks; existing tests and
+what only deployment can tell), which also produces the command ledger and
+runs the allowed tests once; a cost gate that shows the expected number of
+agent invocations and waits for approval; hunting over ledger units, each
+hunter reading only its units' classes; adversarial verification of every
+candidate by a fresh agent that reconstructs the preventing layers before
+judging; independent re-verification (`standard`); and the compiled reports.
+
+Hunting classes (`code-audit/classes/`): `generic.md` for every repository
+and one file per product type — `mcp-server.md`, `cli.md`,
+`agent-runtime.md`. Each class cites where the organization recorded the
+lesson (a heading of the knowledge base or an ADR); `classes.py
+check-knowledge --knowledge <dir> [--adr <dir>]` verifies the citations
+against a checkout.
 
 ## Development
 

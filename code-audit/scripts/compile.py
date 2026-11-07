@@ -48,7 +48,7 @@ L = {
         "th_blockers": "未解決の事実", "th_local": "手元での確認", "th_deploy": "配備側で観測する確認", "claimed": "主張された根本原因", "blockers": "未解決の事実", "plan": "確認の手順",
         "local": "手元", "deployment": "配備側",
         "notes": "覚え書き", "hardening": "強化の提案（所見ではない）", "out_of_scope": "範囲外の観察",
-        "coverage": "網羅の要約", "th_status": "状態", "th_count": "件数", "deferred_units": "先送り・範囲外の単位と理由", "uncovered": "次の波に回すべき未割当の面",
+        "coverage": "網羅の要約", "th_status": "状態", "th_count": "件数", "deferred_units": "先送り・範囲外の単位と理由", "uncovered": "次の波に回すべき未割当の面", "unverified": "検証に至らなかった候補（判定なし・深刻度なし）",
         "rejected": "反証された候補", "rejected_line": "反証された候補は所見ではありません。次回の再報告を抑えるために fingerprint だけを記します: {fps}",
         "carried": "持ち越し", "suppressed": "前回 rejected のまま抑止した主張",
         "nv_title": "code-audit 検証待ちの手がかり",
@@ -77,7 +77,7 @@ L = {
         "th_blockers": "Unresolved facts", "th_local": "Local check", "th_deploy": "Owner-observed check", "claimed": "Claimed root cause", "blockers": "Unresolved facts", "plan": "Validation plan",
         "local": "local", "deployment": "deployment",
         "notes": "Notes", "hardening": "Hardening notes (not findings)", "out_of_scope": "Out-of-scope observations",
-        "coverage": "Coverage summary", "th_status": "Status", "th_count": "Count", "deferred_units": "Deferred and out-of-scope units with reasons", "uncovered": "Unassigned surfaces for a later wave",
+        "coverage": "Coverage summary", "th_status": "Status", "th_count": "Count", "deferred_units": "Deferred and out-of-scope units with reasons", "uncovered": "Unassigned surfaces for a later wave", "unverified": "Candidates not verified (no verdict, no severity)",
         "rejected": "Rejected candidates", "rejected_line": "Rejected candidates are not findings. Only their fingerprints are listed so the next run does not repeat the claim: {fps}",
         "carried": "carried", "suppressed": "claims suppressed as rejected in a prior run",
         "nv_title": "code-audit leads awaiting validation",
@@ -251,6 +251,13 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
         out.append("")
         for u in reasoned:
             out.append(f"- `{plain(u['coverage_id'])}` ({u['status']}): {plain('; '.join(u['unresolved']))}")
+        out.append("")
+    pending = list(candidates.get("candidates", [])) + list(candidates.get("carried", []))
+    if pending:
+        out.append(f"### {t['unverified']}")
+        out.append("")
+        for r in pending:
+            out.append(f"- `{plain(r['fingerprint'])}`: {plain(r.get('title', ''))}")
         out.append("")
     if candidates.get("uncovered"):
         out.append(f"### {t['uncovered']}")

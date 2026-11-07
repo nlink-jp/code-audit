@@ -8,6 +8,7 @@ Usage:
     ledger.py merge-critic <run-dir> <critic-result.json>
     ledger.py decide <run-dir> --fingerprint <fp> --verdict confirmed|needs_validation|rejected [--agent <id>]
     ledger.py defer <run-dir> --reason TEXT (<coverage-id>... | --all-planned)
+    ledger.py abandon <run-dir> --agent <id> --reason TEXT
     ledger.py estimate <run-dir> [--tokens-per-invocation N]
     ledger.py validate <run-dir>
     ledger.py status <run-dir>
@@ -751,6 +752,24 @@ def cmd_defer(args: argparse.Namespace) -> None:
     c.emit({"deferred": [u["coverage_id"] for u in targets], "reason": args.reason})
 
 
+def cmd_abandon(args: argparse.Namespace) -> None:
+    """Return an agent's in_progress units to planned, archiving the attempt.
+
+    Used when a hunter's result was discarded twice: the units need a fresh
+    owner (assign refuses the same agent) or a deferral with a reason."""
+    run_dir = Path(args.run_dir)
+    units = load_ledger(run_dir)
+    candidates = c.load_candidates(run_dir)
+    owned = [u for u in units if u["status"] == "in_progress" and u["agent_id"] == args.agent]
+    if not owned:
+        c.die(f"{args.agent} owns no in_progress unit")
+    for u in owned:
+        archive_attempt(u, args.reason)
+        u["status"] = "planned"
+    save_ledger(run_dir, units, candidates)
+    c.emit({"released": [u["coverage_id"] for u in owned], "agent_id": args.agent, "reason": args.reason})
+
+
 # ---------------------------------------------------------------------------
 # estimate / validate / status
 # ---------------------------------------------------------------------------
@@ -863,6 +882,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--all-planned", action="store_true")
     p.add_argument("coverage_ids", nargs="*")
     p.set_defaults(func=cmd_defer)
+
+    p = sub.add_parser("abandon")
+    p.add_argument("run_dir")
+    p.add_argument("--agent", required=True)
+    p.add_argument("--reason", required=True)
+    p.set_defaults(func=cmd_abandon)
 
     p = sub.add_parser("estimate")
     p.add_argument("run_dir")

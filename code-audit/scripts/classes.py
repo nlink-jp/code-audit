@@ -10,7 +10,8 @@ A class file is Markdown. Each class is a level-2 heading followed, before
 any other content, by one `Source:` line naming where the lesson is
 recorded: `security.md#Heading text` (a document under the knowledge
 repository's docs/en/) or `ADR-021` (an organization ADR), several
-separated by commas. `check-knowledge` verifies that every cited heading
+separated by commas (a comma inside a heading is kept: the split happens
+only before the next `ADR-NNN` or `doc.md#`). `check-knowledge` verifies that every cited heading
 exists in the knowledge repository; ADR references are checked when --adr
 names the ADR directory and reported as unchecked otherwise.
 """
@@ -30,6 +31,9 @@ HEADING_RE = re.compile(r"^## +(.+?)\s*$")
 SOURCE_RE = re.compile(r"^Source:\s*(.+?)\s*$")
 ADR_RE = re.compile(r"^ADR-(\d{3})$")
 KNOWLEDGE_RE = re.compile(r"^([A-Za-z0-9_.-]+\.md)#(.+)$")
+# A comma separates two references only when another reference starts after
+# it; headings themselves may contain commas.
+SPLIT_RE = re.compile(r",\s*(?=ADR-\d{3}\b|[A-Za-z0-9_.-]+\.md#)")
 
 
 def parse_class_file(path: Path) -> tuple[list[dict], list[str]]:
@@ -58,7 +62,7 @@ def parse_class_file(path: Path) -> tuple[list[dict], list[str]]:
         if s:
             if not awaiting_source:
                 errors.append(f"{path.name}:{lineno}: Source: must directly follow the class heading")
-            for ref in (x.strip() for x in s.group(1).split(",")):
+            for ref in (x.strip() for x in SPLIT_RE.split(s.group(1))):
                 if ADR_RE.match(ref):
                     current["sources"].append({"kind": "adr", "ref": ref})
                 elif KNOWLEDGE_RE.match(ref):
