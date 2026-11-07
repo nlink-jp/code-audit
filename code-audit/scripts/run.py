@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -41,9 +42,30 @@ ROLES = ("reconnaissance", "hunter", "critic", "verifier", "reverifier")
 # ---------------------------------------------------------------------------
 
 
+GIT_HARDENING = [
+    # The target is untrusted input: its .git/config may name a fsmonitor,
+    # hooks path or other command. Command-line -c overrides win over every
+    # config file, and the environment disables the system and global ones.
+    "-c", "core.fsmonitor=false",
+    "-c", "core.untrackedCache=false",
+    "-c", "core.hooksPath=/dev/null",
+    "-c", "core.sshCommand=/usr/bin/false",
+    "-c", "core.pager=cat",
+    "-c", "protocol.allow=never",
+]
+GIT_ENV = {
+    "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "LC_ALL": "C",
+}
+
+
 def git(target: Path, *args: str) -> str | None:
     try:
-        out = subprocess.run(["git", "-C", str(target), *args], capture_output=True, text=True, timeout=30)
+        out = subprocess.run(["git", *GIT_HARDENING, "-C", str(target), *args], capture_output=True, text=True, timeout=30, env=GIT_ENV)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if out.returncode != 0:
@@ -212,12 +234,26 @@ def cmd_exec(args: argparse.Namespace) -> None:
     started = time.monotonic()
     timed_out = False
     try:
-        proc = subprocess.run(entry["argv"], cwd=str(cwd), env=env, capture_output=True, text=True, timeout=entry["timeout_sec"], errors="replace")
-        exit_code, stdout, stderr = proc.returncode, proc.stdout, proc.stderr
-    except subprocess.TimeoutExpired as exc:
-        timed_out, exit_code = True, None
-        stdout = (exc.stdout or b"").decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        stderr = (exc.stderr or b"").decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        # A new session puts the command and every process it spawns in one
+        # process group, so a timeout kills the group: killing only the
+        # direct child would leave grandchildren holding the pipes open.
+        proc = subprocess.Popen(entry["argv"], cwd=str(cwd), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        try:
+            out_b, err_b = proc.communicate(timeout=entry["timeout_sec"])
+            exit_code = proc.returncode
+        except subprocess.TimeoutExpired:
+            timed_out, exit_code = True, None
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                out_b, err_b = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                out_b, err_b = b"", b""
+        stdout = out_b.decode("utf-8", "replace")
+        stderr = err_b.decode("utf-8", "replace")
     except OSError as exc:
         exit_code, stdout, stderr = None, "", f"could not start: {exc}"
     duration = round(time.monotonic() - started, 3)

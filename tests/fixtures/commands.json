@@ -35,14 +35,14 @@
     },
     {
       "id": "slow",
-      "argv": ["python3", "-c", "import time; time.sleep(5)"],
+      "argv": ["python3", "-c", "import subprocess; subprocess.run(['sleep', '30'])"],
       "cwd": ".",
       "allowed": true,
       "reason": "",
       "env_allow": [],
       "timeout_sec": 1,
       "writes": [],
-      "source": "test fixture"
+      "source": "test fixture: a grandchild holds the pipes open past the limit"
     }
   ]
 }

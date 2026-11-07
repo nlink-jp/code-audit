@@ -251,10 +251,28 @@ class RunPyTests(RunFixture):
         self.assertNotIn("ANOTHER_TOKEN", names)
         self.assertNotIn("leak-me", log)
 
-    def test_exec_enforces_the_time_limit(self) -> None:
+    def test_exec_enforces_the_time_limit_on_the_whole_process_group(self) -> None:
         out = self.ok(run("run.py", "exec", str(self.run_dir), "slow", "--target", str(self.target)))
         self.assertTrue(out["timed_out"])
         self.assertIsNone(out["exit_code"])
+        # the fixture's grandchild sleeps 30 s; killing only the child would
+        # leave it holding the pipes and exec would wait for it
+        self.assertLess(out["duration_sec"], 10)
+
+    @unittest.skipUnless(shutil.which("git"), "git not available")
+    def test_init_does_not_run_commands_named_in_the_target_git_config(self) -> None:
+        target = self.tmpdir / "hostile"
+        shutil.copytree(SAMPLE_REPO, target)
+        marker = self.tmpdir / "fsmonitor-ran"
+        hook = self.tmpdir / "fsmonitor.sh"
+        hook.write_text(f"#!/bin/sh\ntouch '{marker}'\nprintf '/'\n", encoding="utf-8")
+        hook.chmod(0o755)
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        for cmd in (["git", "init", "-q"], ["git", "add", "."], ["git", "commit", "-q", "-m", "fixture"], ["git", "config", "core.fsmonitor", str(hook)]):
+            subprocess.run(cmd, cwd=str(target), check=True, capture_output=True, env=env)
+        out = self.ok(run("run.py", "init", "--target", str(target), "--output", str(self.tmpdir / "out-hostile")))
+        self.assertRegex(out["source_ref"], r"^[0-9a-f]{40}$")
+        self.assertFalse(marker.exists(), "the target's core.fsmonitor command ran during init")
 
     def test_validate_rejects_forbidden_command_without_reason(self) -> None:
         data = json.loads((FIXTURES / "commands.json").read_text(encoding="utf-8"))

@@ -135,6 +135,15 @@ code-audit/
   macOS Python adds `LC_CTYPE` / `__CF_USER_TEXT_ENCODING` inside the child
   on its own; the test checks that a sentinel variable does not leak rather
   than an exact set.
+- **git is called on an untrusted repository.** `run.py init` runs git with
+  `-c core.fsmonitor=false -c core.hooksPath=/dev/null ...` and an
+  environment that disables the system and global config, because the
+  target's `.git/config` may name a command. A test plants a `core.fsmonitor`
+  script and asserts it never runs.
+- **`run.py exec` kills the whole process group** on timeout
+  (`start_new_session=True` + `os.killpg`); killing only the child would
+  leave a grandchild holding the pipes and the parent waiting. A test spawns
+  a 30-second grandchild under a 1-second limit.
 - **Evidence kinds:** `source` or `existing_test` (a `checks/` log).
   `findings.py validate` enforces rule 1 (overall ≤ impact) and rule 2
   (source-only ⇒ confidence ≤ medium) from `references/severity.md`; the

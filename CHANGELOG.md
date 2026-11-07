@@ -27,8 +27,13 @@
   status), `scripts/findings.py` (validate, add one record at a time with
   stale-digest refusal, note), `scripts/compile.py` (ja/en reports derived
   from records, code only inside fences), `scripts/classes.py` (list, size,
-  check-knowledge). 39 tests over a fixture repository with a deliberate
+  check-knowledge). 40 tests over a fixture repository with a deliberate
   path traversal.
+- Hardening from the commit-time security review: `run.py` calls git on the
+  untrusted target with command-line config overrides (`core.fsmonitor`,
+  `core.hooksPath`, `core.sshCommand`, `protocol.allow`) and a minimal
+  environment that disables system and global config; `run.py exec` runs the
+  command in its own session and kills the whole process group on timeout.
 
 ### Planned for 0.1.0
 
