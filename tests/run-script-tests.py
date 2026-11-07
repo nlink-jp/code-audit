@@ -430,8 +430,8 @@ class RunPyTests(RunFixture):
         (outside / "secret").write_text("s3cret\n", encoding="utf-8")
         os.symlink(outside / "secret", self.target / "app" / "link.txt")
         os.symlink(outside, self.target / "app" / "linkdir")
-        before = contract.digests_for(self.target, ["app", "app/link.txt", "app/linkdir", "/etc/hosts", "nope"])
-        self.assertEqual((before["app/link.txt"], before["app/linkdir"], before["/etc/hosts"], before["nope"]), ("symlink", "symlink", "invalid", "missing"))
+        before = contract.digests_for(self.target, ["app", "app/link.txt", "app/linkdir", "app/linkdir/secret", "/etc/hosts", "nope"])
+        self.assertEqual((before["app/link.txt"], before["app/linkdir"], before["app/linkdir/secret"], before["/etc/hosts"], before["nope"]), ("symlink", "symlink", "symlink", "invalid", "missing"))
         self.assertNotIn("s3cret", json.dumps(before))
         cache = self.target / "app" / "__pycache__"
         cache.mkdir()

@@ -308,6 +308,23 @@ def _regular_files(root: Path) -> Iterable[Path]:
             yield p
 
 
+def lstat_no_links(target: Path, rel: str) -> os.stat_result | None:
+    """lstat of target/rel where no component of rel may be a link: a link
+    in the middle of the path would carry the walk outside the target. Returns
+    the final component's lstat, a link's lstat when any component is a link
+    (so the caller records 'symlink'), or None when something is missing."""
+    cur = target
+    for part in rel.split("/"):
+        cur = cur / part
+        try:
+            st = os.lstat(cur)
+        except OSError:
+            return None
+        if stat.S_ISLNK(st.st_mode):
+            return st
+    return st
+
+
 def digests_for(target: Path, paths: Iterable[str]) -> dict[str, str]:
     """sha256 per repository-relative path. Values other than a digest:
     'missing' (no such regular file or directory), 'symlink' (the cited path
@@ -321,9 +338,8 @@ def digests_for(target: Path, paths: Iterable[str]) -> dict[str, str]:
             out[rel] = "invalid"
             continue
         p = target / rel
-        try:
-            st = os.lstat(p)
-        except OSError:
+        st = lstat_no_links(target, rel)
+        if st is None:
             out[rel] = "missing"
             continue
         if stat.S_ISLNK(st.st_mode):
