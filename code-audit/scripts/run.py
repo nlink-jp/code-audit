@@ -257,12 +257,20 @@ def git(scratch: Path, worktree: Path, *args: str) -> str | None:
     return out.stdout.strip()
 
 
+NAME_PART_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+
+
 def repo_name_from(config: dict[str, str], target: Path) -> str:
+    """owner/name from the remote URL when both parts have the shape of a
+    repository name; otherwise the target directory's name, reduced to that
+    shape. The URL is the target's text and becomes a title and a directory
+    name, so it is accepted by shape, never by trust."""
     url = config.get("remote.origin.url", "")
     m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$", url)
-    if m:
+    if m and NAME_PART_RE.fullmatch(m.group(1)) and NAME_PART_RE.fullmatch(m.group(2)) and m.group(1) not in (".", "..") and m.group(2) not in (".", ".."):
         return f"{m.group(1)}/{m.group(2)}"
-    return target.resolve().name
+    base = re.sub(r"[^A-Za-z0-9._-]", "-", target.resolve().name)[:100].strip(".-")
+    return base or "target"
 
 
 def inspect_target(target: Path) -> dict:

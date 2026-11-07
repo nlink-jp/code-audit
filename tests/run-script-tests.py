@@ -1018,6 +1018,31 @@ class CompileTests(RunFixture):
             self.assertIn("- `app/files.py:read_user_file:path-traversal`: Path traversal in read_user_file", text)
             self.assertNotIn("| high |", text)
 
+    def test_report_text_is_inert_and_identifiers_match_whole(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        import _contract as contract  # noqa: E402
+        import compile as compile_module  # noqa: E402
+        self.assertEqual(compile_module.plain("a\x1b[31mb\u202ec\u200bd\x9be|f```g"), "a[31mbcde\\|f` ` `g")
+        self.assertEqual(compile_module.code("x` injected `y"), "x' injected 'y")
+        self.assertFalse(contract.is_agent_id("hunter-1\n"))
+        self.assertFalse(contract.is_fingerprint("a:b:c\n"))
+        self.assertEqual(contract.validate_part({"agent_id": "hunter-1\n", "kind": "hardening", "text": "x"}, "note"), ["$.agent_id: 'hunter-1\n' does not match pattern ^[a-z0-9][a-z0-9_-]{0,63}$"])
+        # a record carrying a terminal escape in prose is refused before it is written
+        self.hunt()
+        rec = self.candidate_record(0, title="Path traversal\x1b[31m in read_user_file")
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "esc.json"))), "control or format character U+001B")
+        rec = self.candidate_record(0, fingerprint="app/files.py:read_user_file:path-traversal\n")
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "nl.json"))), "does not match pattern")
+
+    def test_repo_name_is_accepted_by_shape(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        import run as run_module  # noqa: E402
+        self.assertEqual(run_module.repo_name_from({"remote.origin.url": "https://github.com/example/sample.git"}, self.target), "example/sample")
+        self.assertEqual(run_module.repo_name_from({"remote.origin.url": "git@github.com:example/sample"}, self.target), "example/sample")
+        self.assertEqual(run_module.repo_name_from({"remote.origin.url": "https://x/\x1b[31m EVIL/..;rm -rf"}, self.target), "target")
+        self.assertEqual(run_module.repo_name_from({"remote.origin.url": "https://x/a b/na me.git"}, self.target), "target")
+        self.assertEqual(run_module.repo_name_from({}, self.tmpdir / "we ird\x1bname"), "we-ird-name")
+
 
 class ClassesTests(unittest.TestCase):
     def test_list_parses_headings_and_sources(self) -> None:

@@ -67,7 +67,7 @@ def by_id(units: list) -> dict:
 
 
 def build_unit(proposal: dict, profile: str, target: Path, where: str) -> tuple[dict | None, list[str]]:
-    errors = c.validate_part(proposal, "unit_proposal", where)
+    errors = c.validate_part(proposal, "unit_proposal", where) + c.forbidden_char_errors(proposal, where)
     if errors:
         return None, errors
     refs = dict(proposal["canonical_refs"])
@@ -540,7 +540,7 @@ def record_errors(run_dir: Path | None, rec: dict, where: str) -> list[str]:
     part = {"confirmed": "finding_confirmed", "needs_validation": "finding_needs_validation", "rejected": "finding_rejected"}.get(verdict)
     if part is None:
         return [f"{where}.verdict: must be one of {list(VERDICTS)}"]
-    errors = c.validate_part(rec, part, where)
+    errors = c.validate_part(rec, part, where) + c.forbidden_char_errors(rec, where)
     if errors:
         return errors
     for i, t in enumerate(rec["trace"]):
@@ -601,7 +601,7 @@ def record_errors(run_dir: Path | None, rec: dict, where: str) -> list[str]:
 def cmd_record(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     result = c.read_json(Path(args.result))
-    errors = c.validate_part(result, "hunter_result", "result")
+    errors = c.validate_part(result, "hunter_result", "result") + c.forbidden_char_errors(result, "result")
     c.fail_if(errors)
     agent = result["agent_id"]
     if not c.is_agent_id(agent):
@@ -729,7 +729,7 @@ def cmd_merge_critic(args: argparse.Namespace) -> None:
     if not target.is_dir():
         c.die(f"target is not a directory: {args.target}")
     critic = c.read_json(Path(args.result))
-    errors = c.validate_part(critic, "critic_result", "critic")
+    errors = c.validate_part(critic, "critic_result", "critic") + c.forbidden_char_errors(critic, "critic")
     c.fail_if(errors)
     quick = meta["profile"] == "quick"
     units = load_ledger(run_dir)

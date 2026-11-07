@@ -150,8 +150,12 @@ def check(value: object, schema: dict, path: str, errors: list[str]) -> None:
         if min_len is not None and len(value.strip()) < min_len:
             errors.append(f"{path}: must have at least {min_len} visible character(s)")
         pattern = schema.get("pattern")
-        if pattern and not re.search(pattern, value):
-            errors.append(f"{path}: '{value}' does not match pattern {pattern}")
+        if pattern:
+            # An anchored pattern is matched whole: `$` alone would accept a
+            # trailing newline and let one identifier exist twice.
+            matched = re.fullmatch(pattern[1:-1], value) if pattern.startswith("^") and pattern.endswith("$") else re.search(pattern, value)
+            if not matched:
+                errors.append(f"{path}: '{value}' does not match pattern {pattern}")
     elif "boolean" in types:
         if not isinstance(value, bool):
             errors.append(f"{path}: expected boolean, got {type(value).__name__}")
@@ -191,11 +195,33 @@ def is_repo_relative(path: str) -> bool:
 
 
 def is_agent_id(value: object) -> bool:
-    return isinstance(value, str) and bool(AGENT_ID_RE.match(value)) and value not in WINDOWS_DEVICES
+    return isinstance(value, str) and bool(AGENT_ID_RE.fullmatch(value)) and value not in WINDOWS_DEVICES
 
 
 def is_fingerprint(value: object) -> bool:
-    return isinstance(value, str) and bool(FINGERPRINT_RE.match(value))
+    return isinstance(value, str) and bool(FINGERPRINT_RE.fullmatch(value))
+
+
+def forbidden_char_errors(value: object, path: str) -> list[str]:
+    """Strings anywhere in a sub-agent's return or a record may not carry
+    control or format characters (terminal escapes, C1 controls,
+    bidirectional overrides, zero-width characters): they would ride into
+    the report and the terminal. Newline and tab are allowed, since code
+    excerpts need them; the report makes them inert at its egress."""
+    errors: list[str] = []
+    if isinstance(value, str):
+        for ch in value:
+            if unicodedata.category(ch).startswith("C") and ch not in "\n\t":
+                errors.append(f"{path}: control or format character U+{ord(ch):04X} is not allowed")
+                break
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            errors += forbidden_char_errors(k, f"{path}.{k!r}" if forbidden_char_errors(k, "") else path)
+            errors += forbidden_char_errors(v, f"{path}.{k}")
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            errors += forbidden_char_errors(v, f"{path}[{i}]")
+    return errors
 
 
 def _identity(path: Path) -> tuple[int, int] | None:

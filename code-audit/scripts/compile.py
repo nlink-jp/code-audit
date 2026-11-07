@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -86,9 +87,19 @@ L = {
 
 
 def plain(text: object) -> str:
-    """Prose for a Markdown line or cell: one line, no fence, no table break."""
-    s = " ".join(str(text).split())
+    """Prose for a Markdown line or cell: one line, no control or format
+    character (terminal escapes, C1 controls, bidirectional overrides,
+    zero-width characters all go), no fence, no table break. Made inert here,
+    once, for everything the report prints — never at each print site."""
+    s = "".join(ch for ch in str(text) if not unicodedata.category(ch).startswith("C") or ch in "\n\t")
+    s = " ".join(s.split())
     return s.replace("```", "` ` `").replace("|", "\\|")
+
+
+def code(text: object) -> str:
+    """A value placed inside an inline code span: plain, and no backtick, so
+    the value cannot close the span and start Markdown of its own."""
+    return plain(text).replace("`", "'")
 
 
 def fenced(code: str, lang: str = "") -> list[str]:
@@ -180,9 +191,9 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
         for r in confirmed:
             out.append(f"### [{r['severity']['overall']}] {plain(r['title'])}")
             out.append("")
-            out.append(f"- {t['fingerprint']}: `{plain(r['fingerprint'])}`")
+            out.append(f"- {t['fingerprint']}: `{code(r['fingerprint'])}`")
             out.append(f"- {t['evidence_kind']}: {plain(kind_label(r, t))}")
-            out.append(f"- {t['coverage_ids']}: " + ", ".join(f"`{plain(x)}`" for x in r["coverage_ids"]))
+            out.append(f"- {t['coverage_ids']}: " + ", ".join(f"`{code(x)}`" for x in r["coverage_ids"]))
             out.append("")
             out.append(f"**{t['description']}.** {plain(r['description'])}")
             out.append("")
@@ -193,12 +204,12 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
             out.append(f"**{t['trace']}.**")
             out.append("")
             for i, s in enumerate(r["trace"], start=1):
-                out.append(f"{i}. `{plain(s['file'])}:{s['line']}` ({s['kind']}, {plain(s['scope'])}) — {plain(s['description'])}")
+                out.append(f"{i}. `{code(s['file'])}:{s['line']}` ({s['kind']}, {plain(s['scope'])}) — {plain(s['description'])}")
             out.append("")
             out.append(f"**{t['evidence']}.**")
             out.append("")
             for e in r["evidence"]:
-                out.append(f"- `{plain(e['file'])}:{e['line']}` — {plain(e['description'])}")
+                out.append(f"- `{code(e['file'])}:{e['line']}` — {plain(e['description'])}")
             out.append("")
             if r["conditions"]:
                 out.append(f"**{t['conditions']}.**")
@@ -216,7 +227,7 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
             out.append(f"**{t['remediation']}.** {plain(r['remediation']['strategy'])}")
             out.append("")
             for chg in r["remediation"]["code_changes"]:
-                out.append(f"{t['code_changes']}: `{plain(chg['file_name'])}`")
+                out.append(f"{t['code_changes']}: `{code(chg['file_name'])}`")
                 out.append("")
                 out += fenced(chg["fixed_code"])
 
@@ -257,26 +268,26 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
         out.append(f"### {t['deferred_units']}")
         out.append("")
         for u in reasoned:
-            out.append(f"- `{plain(u['coverage_id'])}` ({u['status']}): {plain('; '.join(u['unresolved']))}")
+            out.append(f"- `{code(u['coverage_id'])}` ({u['status']}): {plain('; '.join(u['unresolved']))}")
         out.append("")
     if undecided:
         out.append(f"### {t['undecided']}")
         out.append("")
         for r in undecided:
-            out.append(f"- `{plain(r['fingerprint'])}`: {plain(r.get('title', ''))}")
+            out.append(f"- `{code(r['fingerprint'])}`: {plain(r.get('title', ''))}")
         out.append("")
     if candidates.get("unlinked_prior"):
         out.append(f"### {t['unlinked_prior']}")
         out.append("")
         for r in candidates["unlinked_prior"]:
-            out.append(f"- `{plain(r['fingerprint'])}` ({plain(r['prior_run'])}, {plain(r['verdict'])}): {plain(r.get('title', ''))}")
+            out.append(f"- `{code(r['fingerprint'])}` ({plain(r['prior_run'])}, {plain(r['verdict'])}): {plain(r.get('title', ''))}")
         out.append("")
     pending = list(candidates.get("candidates", [])) + list(candidates.get("carried", []))
     if pending:
         out.append(f"### {t['unverified']}")
         out.append("")
         for r in pending:
-            out.append(f"- `{plain(r['fingerprint'])}`: {plain(r.get('title', ''))}")
+            out.append(f"- `{code(r['fingerprint'])}`: {plain(r.get('title', ''))}")
         out.append("")
     if candidates.get("uncovered"):
         out.append(f"### {t['uncovered']}")
@@ -288,12 +299,12 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
         out.append(f"### {t['suppressed']}")
         out.append("")
         for s in candidates["suppressed"]:
-            out.append(f"- `{plain(s['fingerprint'])}`")
+            out.append(f"- `{code(s['fingerprint'])}`")
         out.append("")
     if rejected:
         out.append(f"## {t['rejected']}")
         out.append("")
-        out.append(t["rejected_line"].format(fps=", ".join(f"`{plain(r['fingerprint'])}`" for r in rejected)))
+        out.append(t["rejected_line"].format(fps=", ".join(f"`{code(r['fingerprint'])}`" for r in rejected)))
         out.append("")
     return "\n".join(out).rstrip("\n") + "\n"
 
@@ -313,10 +324,10 @@ def render_needs_validation(lang: str, meta: dict, findings: list) -> str:
     for r in nv:
         out.append(f"## {plain(r['title'])}")
         out.append("")
-        out.append(f"- {t['fingerprint']}: `{plain(r['fingerprint'])}`")
-        out.append(f"- {t['coverage_ids']}: " + ", ".join(f"`{plain(x)}`" for x in r["coverage_ids"]))
+        out.append(f"- {t['fingerprint']}: `{code(r['fingerprint'])}`")
+        out.append(f"- {t['coverage_ids']}: " + ", ".join(f"`{code(x)}`" for x in r["coverage_ids"]))
         if r.get("carried_from"):
-            out.append(f"- {t['carried']}: `{plain(r['carried_from'])}`")
+            out.append(f"- {t['carried']}: `{code(r['carried_from'])}`")
         out.append("")
         out.append(f"**{t['description']}.** {plain(r['description'])}")
         out.append("")
@@ -325,12 +336,12 @@ def render_needs_validation(lang: str, meta: dict, findings: list) -> str:
         out.append(f"**{t['trace']}.**")
         out.append("")
         for i, s in enumerate(r["trace"], start=1):
-            out.append(f"{i}. `{plain(s['file'])}:{s['line']}` ({s['kind']}, {plain(s['scope'])}) — {plain(s['description'])}")
+            out.append(f"{i}. `{code(s['file'])}:{s['line']}` ({s['kind']}, {plain(s['scope'])}) — {plain(s['description'])}")
         out.append("")
         out.append(f"**{t['evidence']}.**")
         out.append("")
         for e in r["evidence"]:
-            out.append(f"- `{plain(e['file'])}:{e['line']}` — {plain(e['description'])}")
+            out.append(f"- `{code(e['file'])}:{e['line']}` — {plain(e['description'])}")
         out.append("")
         out.append(f"**{t['blockers']}.**")
         out.append("")

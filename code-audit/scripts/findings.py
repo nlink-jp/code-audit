@@ -217,7 +217,7 @@ def cmd_note(args: argparse.Namespace) -> None:
     note = {"agent_id": args.agent, "kind": args.kind, "text": args.text}
     if args.coverage_id:
         note["coverage_id"] = args.coverage_id
-    errors = c.validate_part(note, "note", "note")
+    errors = c.validate_part(note, "note", "note") + c.forbidden_char_errors(note, "note")
     if not c.is_agent_id(args.agent):
         errors.append("note.agent_id: not a canonical agent id")
     c.fail_if(errors)
