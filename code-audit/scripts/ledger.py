@@ -212,6 +212,30 @@ def validate_unit(run_dir: Path, unit: dict, index: int) -> list[str]:
     return errors
 
 
+def check_log_problem(run_dir: Path, log: str) -> str | None:
+    """Why a checks/ log cannot serve as existing_test evidence: it does not
+    exist, or its header says the command never ran to completion (timed out
+    or could not start). A non-zero exit is still evidence — a failing test
+    can be the observation."""
+    path = run_dir / log
+    if not path.is_file():
+        return f"{log} does not exist in the run directory"
+    head: dict[str, str] = {}
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        for _ in range(12):
+            line = fh.readline()
+            if not line or line.startswith("---"):
+                break
+            if ":" in line:
+                k, v = line.split(":", 1)
+                head[k.strip()] = v.strip()
+    if head.get("timed_out") == "True":
+        return f"{log}: the command timed out; its log is not evidence"
+    if head.get("exit_code") in (None, "None"):
+        return f"{log}: the command did not run to completion; its log is not evidence"
+    return None
+
+
 def validate_checks(run_dir: Path, checks: list, reviewed_paths: list, base: str) -> list[str]:
     errors: list[str] = []
     union: set[str] = set()
@@ -232,8 +256,10 @@ def validate_checks(run_dir: Path, checks: list, reviewed_paths: list, base: str
         if chk["method"] == "existing_test":
             if chk["check_log"] is None:
                 errors.append(f"{cb}.check_log: an existing_test check needs its checks/ log")
-            elif not (run_dir / chk["check_log"]).is_file():
-                errors.append(f"{cb}.check_log: {chk['check_log']} does not exist in the run directory")
+            else:
+                problem = check_log_problem(run_dir, chk["check_log"])
+                if problem:
+                    errors.append(f"{cb}.check_log: {problem}")
     if checks and union != set(reviewed_paths):
         errors.append(f"{base}: unit reviewed_paths must equal the union of its checks' reviewed_paths")
     return errors
@@ -462,10 +488,23 @@ def cmd_assign(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     if not c.is_agent_id(args.agent):
         c.die(f"'{args.agent}' is not a canonical agent id (^[a-z0-9][a-z0-9_-]{{0,63}}$, no Windows device name)")
+    meta = c.load_metadata(run_dir)
     units = load_ledger(run_dir)
     candidates = c.load_candidates(run_dir)
     ids = by_id(units)
     errors: list[str] = []
+    # The cost gate is a fact of the books: no hunter before the approval,
+    # and none that would spend what critics and verifiers need.
+    if not meta.get("approved"):
+        errors.append("the run is not approved; show the estimate and record the approval with run.py approve")
+    elif meta["budget"] is None:
+        errors.append("the run has no budget; run.py approve sets it")
+    else:
+        est = estimate_numbers(meta, units, candidates)
+        if est["spent"] + 1 + est["reserve_for_critics_and_verifiers"] > meta["budget"]:
+            errors.append(f"budget {meta['budget']} cannot take another hunter and still reserve {est['reserve_for_critics_and_verifiers']} for critics and verifiers (spent {est['spent']}); defer the planned units instead")
+    if args.agent in used_agent_ids(units):
+        errors.append(f"{args.agent}: agent id already used in this run; every agent is a fresh one")
     for cid in args.coverage_ids:
         u = ids.get(cid)
         if u is None:
@@ -545,8 +584,10 @@ def record_errors(run_dir: Path | None, rec: dict, where: str) -> list[str]:
         else:
             if rec["check_log"] is None:
                 errors.append(f"{where}.check_log: existing_test evidence needs its checks/ log")
-            elif run_dir is not None and not (run_dir / rec["check_log"]).is_file():
-                errors.append(f"{where}.check_log: {rec['check_log']} does not exist in the run directory")
+            elif run_dir is not None:
+                problem = check_log_problem(run_dir, rec["check_log"])
+                if problem:
+                    errors.append(f"{where}.check_log: {problem}")
         for i, chg in enumerate(rec["remediation"]["code_changes"]):
             if not c.is_repo_relative(chg["file_name"]):
                 errors.append(f"{where}.remediation.code_changes[{i}].file_name: must be repository-relative")
@@ -783,6 +824,8 @@ def cmd_decide(args: argparse.Namespace) -> None:
             if u["status"] in ("planned", "deferred"):
                 if not args.agent or not c.is_agent_id(args.agent):
                     c.die(f"{fp}: linking a carried record to {u['status']} unit {cid} needs --agent (the verifier becomes the owner)")
+                if args.agent in used_agent_ids(units) and not any(x["agent_id"] == args.agent for x in linked):
+                    c.die(f"{fp}: {args.agent} already used in this run; the verifier of a carried record is a fresh agent")
                 files = sorted({e["file"] for e in rec["evidence"]})
                 u["status"] = "candidate"
                 u["agent_id"] = args.agent
@@ -856,11 +899,9 @@ def counts(units: list) -> dict:
     return out
 
 
-def cmd_estimate(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir)
-    meta = c.load_metadata(run_dir)
-    units = load_ledger(run_dir)
-    candidates = c.load_candidates(run_dir)
+def estimate_numbers(meta: dict, units: list, candidates: dict) -> dict:
+    """The one arithmetic of the cost gate: what the remaining work costs in
+    invocations and what must stay reserved for critics and verifiers."""
     quick = meta["profile"] == "quick"
     planned = sum(1 for u in units if u["status"] == "planned")
     pending = len(candidates["candidates"]) + len(candidates["carried"])
@@ -869,8 +910,7 @@ def cmd_estimate(args: argparse.Namespace) -> None:
     expected_candidates = pending + max(1, math.ceil(planned * 0.3))
     verifiers = expected_candidates * stages
     spent = sum(meta["invocations"].values())
-    total = spent + planned + critics + verifiers
-    est = {
+    return {
         "profile": meta["profile"],
         "spent": spent,
         "hunters": planned,
@@ -878,13 +918,39 @@ def cmd_estimate(args: argparse.Namespace) -> None:
         "verification_stages": stages,
         "expected_candidates": expected_candidates,
         "verifiers": verifiers,
-        "total_invocations": total,
-        "tokens_per_invocation": args.tokens_per_invocation,
-        "tokens_estimate": total * args.tokens_per_invocation if args.tokens_per_invocation else None,
+        "total_invocations": spent + planned + critics + verifiers,
         "budget": meta["budget"],
-        "fits_budget": meta["budget"] is None or total <= meta["budget"],
+        "approved": bool(meta.get("approved")),
         "reserve_for_critics_and_verifiers": critics + verifiers,
     }
+
+
+def used_agent_ids(units: list) -> set[str]:
+    """Every agent id the ledger has seen: owners, archived attempts, checks.
+    An id is used once per run so that 'a fresh agent' is a fact of the books."""
+    used: set[str] = set()
+    for u in units:
+        if u.get("agent_id"):
+            used.add(u["agent_id"])
+        for att in u.get("attempts", []):
+            if att.get("agent_id"):
+                used.add(att["agent_id"])
+            for chk in att.get("checks", []):
+                used.add(chk.get("agent_id", ""))
+        for chk in u.get("checks", []):
+            used.add(chk.get("agent_id", ""))
+    used.discard("")
+    return used
+
+
+def cmd_estimate(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    meta = c.load_metadata(run_dir)
+    est = estimate_numbers(meta, load_ledger(run_dir), c.load_candidates(run_dir))
+    total = est["total_invocations"]
+    est["tokens_per_invocation"] = args.tokens_per_invocation
+    est["tokens_estimate"] = total * args.tokens_per_invocation if args.tokens_per_invocation else None
+    est["fits_budget"] = meta["budget"] is None or total <= meta["budget"]
     c.emit(est)
 
 

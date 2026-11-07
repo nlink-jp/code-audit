@@ -3,13 +3,20 @@
 
 Usage:
     findings.py validate <run-dir | findings.json> [--target <dir>]
-    findings.py add <run-dir> <record.json> [--replace] [--target <dir>]
+    findings.py add <run-dir> <record.json> [--replace --by <agent> [--confirmed-by <agent>]] [--target <dir>]
+    findings.py digest <record.json | hunter-result.json | verifier-return.json> --target <dir>
     findings.py note <run-dir> --agent <id> --kind out_of_scope|hardening --text TEXT [--coverage-id ID]
 
-`add` inserts one validated record, sorted by fingerprint, and refuses a
-duplicate fingerprint unless --replace. The parent never rewrites
+`add` inserts one validated record, sorted by fingerprint, for a claim the
+ledger holds (a pending candidate; with --replace, a decided one), and
+refuses a duplicate fingerprint unless --replace. A replacement needs --by;
+one that strengthens the verdict, severity, confidence or evidence kind also
+needs --confirmed-by (a different agent). The parent never rewrites
 findings.json whole. With --target, the record's source digests are checked
-against the current files so a stale record is refused.
+against the current files so a stale record is refused. `digest` fills
+source_digests from the files a record cites, so the parent never computes
+one by hand. `validate <run-dir>` also cross-checks the records against the
+ledger's decisions.
 """
 
 from __future__ import annotations
@@ -169,6 +176,41 @@ def cmd_add(args: argparse.Namespace) -> None:
     })
 
 
+def cited_files(rec: dict) -> list[str]:
+    files = {t.get("file") for t in rec.get("trace", []) if isinstance(t, dict)}
+    files |= {e.get("file") for e in rec.get("evidence", []) if isinstance(e, dict)}
+    return sorted(f for f in files if isinstance(f, str) and f)
+
+
+def cmd_digest(args: argparse.Namespace) -> None:
+    """Fill `source_digests` of a record, of every candidate in a hunter
+    result, or of the `record` in a verifier return, from the files its trace
+    and evidence cite, and write the file back. The parent never computes a
+    digest by hand."""
+    path = Path(args.path)
+    data = c.read_json(path)
+    target = Path(args.target)
+    if not target.is_dir():
+        c.die(f"target is not a directory: {args.target}")
+    if not isinstance(data, dict):
+        c.die("expected a JSON object")
+    if isinstance(data.get("candidates"), list):
+        records = [r for r in data["candidates"] if isinstance(r, dict)]
+    elif isinstance(data.get("record"), dict):
+        records = [data["record"]]
+    else:
+        records = [data]
+    filled = {}
+    for rec in records:
+        files = cited_files(rec)
+        if not files:
+            continue
+        rec["source_digests"] = c.digests_for(target, files)
+        filled[rec.get("fingerprint", "?")] = rec["source_digests"]
+    c.write_json(path, data)
+    c.emit({"path": str(path.name), "digested": filled})
+
+
 def cmd_note(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     c.load_metadata(run_dir)
@@ -193,6 +235,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("path")
     p.add_argument("--target")
     p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("digest")
+    p.add_argument("path")
+    p.add_argument("--target", required=True)
+    p.set_defaults(func=cmd_digest)
 
     p = sub.add_parser("add")
     p.add_argument("run_dir")

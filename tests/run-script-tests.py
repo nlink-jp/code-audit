@@ -189,8 +189,11 @@ class RunFixture(unittest.TestCase):
         path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         return path
 
-    def seed(self, *extra: str) -> dict:
-        return self.ok(run("ledger.py", "seed", str(self.run_dir), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), *extra))
+    def seed(self, *extra: str, approve: bool = True) -> dict:
+        out = self.ok(run("ledger.py", "seed", str(self.run_dir), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), *extra))
+        if approve:
+            self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "40"))
+        return out
 
     def hunt(self) -> dict:
         """seed → exec unit-tests → assign → record. Returns the record summary."""
@@ -446,6 +449,21 @@ class RunPyTests(RunFixture):
             contract.DIGEST_LIMITS.clear()
             contract.DIGEST_LIMITS.update(limits)
 
+    def test_approve_count_and_complete_are_guarded(self) -> None:
+        self.refused(run("run.py", "approve", str(self.run_dir)), "pass --budget")
+        self.refused(run("run.py", "count", str(self.run_dir), "hunter", "--n", "0"), "positive integer")
+        self.refused(run("run.py", "init", "--target", str(self.target), "--output", str(self.tmpdir / "zero"), "--budget", "0"), "below minimum")
+        self.assertFalse((self.tmpdir / "zero").exists(), "a refused init must leave no directory behind")
+        self.seed(approve=False)
+        out = self.ok(run("run.py", "approve", str(self.run_dir)))
+        est = self.ok(run("ledger.py", "estimate", str(self.run_dir)))
+        self.assertEqual((out["approved"], out["budget"]), (True, est["total_invocations"]))
+        self.assertTrue(est["approved"])
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1))
+        self.refused(run("run.py", "set-status", str(self.run_dir), "complete"), "not complete")
+        self.ok(run("run.py", "set-status", str(self.run_dir), "incomplete", "--reason", "stopped"))
+
 
 class LedgerTests(RunFixture):
     def test_seed_derives_ids_and_digests(self) -> None:
@@ -477,6 +495,18 @@ class LedgerTests(RunFixture):
         units = json.loads((quick / "coverage-ledger.json").read_text(encoding="utf-8"))
         self.assertTrue(all(u["canonical_refs"]["subsystem"] == "profile/quick/all-in-scope-subsystems" for u in units))
         self.assertTrue(all("profile%2Fquick" in u["coverage_id"] for u in units))
+
+    def test_assign_needs_approval_budget_and_a_fresh_agent(self) -> None:
+        self.seed(approve=False)
+        u1, u2 = self.unit_ids()
+        self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1), "not approved")
+        self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "5"))
+        # standard reserves 3 critics + 2 stages × 1 expected candidate = 5; no room for a hunter
+        self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1), "cannot take another hunter")
+        self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "40"))
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1))
+        self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u2), "already used in this run")
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-2", u2))
 
     def test_assign_moves_planned_units_to_in_progress(self) -> None:
         self.seed()
@@ -520,6 +550,32 @@ class LedgerTests(RunFixture):
         unclaimed["units"][0]["candidate_fingerprints"] = unclaimed["units"][0]["candidate_fingerprints"][:1]
         self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(unclaimed, "unclaimed.json"))), "not listed in any reported unit")
         self.assertEqual([u["status"] for u in self.ledger()], ["in_progress", "in_progress"])
+
+    def test_a_log_of_a_command_that_did_not_run_is_not_evidence(self) -> None:
+        self.seed()
+        self.ok(run("run.py", "exec", str(self.run_dir), "slow", "--target", str(self.target)))
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1, u2))
+        result = self.hunter_result()
+        result["units"][1]["checks"][0]["check_log"] = "checks/slow.log"
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "slow.json"))), "timed out; its log is not evidence")
+
+    def test_digest_fills_source_digests_from_the_cited_files(self) -> None:
+        self.seed()
+        self.ok(run("run.py", "exec", str(self.run_dir), "unit-tests", "--target", str(self.target)))
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1, u2))
+        result = self.hunter_result()
+        for cand in result["candidates"]:
+            cand["source_digests"] = {}
+        path = self.write_json(result, "undigested.json")
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(path)), "must digest the cited paths")
+        out = self.ok(run("findings.py", "digest", str(path), "--target", str(self.target)))
+        self.assertEqual(out["digested"]["app/files.py:read_user_file:path-traversal"], {"app/files.py": self.d1})
+        self.ok(run("ledger.py", "record", str(self.run_dir), str(path)))
+        ret = self.write_json({"agent_id": "verifier-1", "verdict": "confirmed", "record": dict(self.candidate_record(0), source_digests={}), "layers_examined": [], "notes": []}, "verifier.json")
+        out = self.ok(run("findings.py", "digest", str(ret), "--target", str(self.target)))
+        self.assertEqual(json.loads(ret.read_text(encoding="utf-8"))["record"]["source_digests"], {"app/files.py": self.d1})
 
     def test_record_holds_candidates_to_the_findings_bar(self) -> None:
         self.seed()

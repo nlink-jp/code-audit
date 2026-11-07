@@ -3,6 +3,7 @@
 
 Usage:
     run.py init --target <dir> [--output <dir>] [--profile quick|standard]
+    run.py approve <run-dir> [--budget N]
                 [--budget N] [--prior <run-dir>]...
     run.py set-budget <run-dir> N
     run.py count <run-dir> reconnaissance|hunter|critic|verifier|reverifier [--n N]
@@ -312,8 +313,6 @@ def cmd_init(args: argparse.Namespace) -> None:
             c.die(f"prior run has no {c.METADATA_FILE}: {p}")
         priors.append(pp.resolve().name)
     source_ref, dirty = info["source_ref"], info["dirty"]
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / c.CHECKS_DIR).mkdir(exist_ok=True)
     metadata = {
         "run_id": run_dir.name if re.match(r"^run-[0-9]+$", run_dir.name) else re.sub(r"[^a-z0-9_-]", "-", run_dir.name.lower())[:64] or "run",
         "repo": name,
@@ -329,6 +328,8 @@ def cmd_init(args: argparse.Namespace) -> None:
         "execution_policy": "read-and-existing-tests",
     }
     c.fail_if(c.validate_part(metadata, "metadata"))
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / c.CHECKS_DIR).mkdir(exist_ok=True)
     c.write_json(run_dir / c.METADATA_FILE, metadata)
     c.emit({"output_dir": str(run_dir), "run_id": metadata["run_id"], "repo": name, "source_ref": source_ref, "dirty": dirty, "profile": args.profile})
 
@@ -348,12 +349,39 @@ def cmd_set_budget(args: argparse.Namespace) -> None:
     c.emit({"budget": meta["budget"]})
 
 
+def cmd_approve(args: argparse.Namespace) -> None:
+    """Record the human's approval of the cost estimate. Until it is recorded
+    no hunter can be assigned (`ledger.py assign` checks it); the budget is
+    the one given here, else the one already recorded, else the estimate's
+    total."""
+    run_dir = Path(args.run_dir)
+    meta = c.load_metadata(run_dir)
+    if args.budget is not None:
+        if args.budget < 1:
+            c.die("budget must be a positive integer")
+        meta["budget"] = args.budget
+    if meta["budget"] is None:
+        if not (run_dir / c.LEDGER_FILE).exists():
+            c.die("no budget recorded and no ledger to estimate from; pass --budget")
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import ledger  # noqa: E402
+        est = ledger.estimate_numbers(meta, ledger.load_ledger(run_dir), c.load_candidates(run_dir))
+        meta["budget"] = est["total_invocations"]
+    meta["approved"] = True
+    c.fail_if(c.validate_part(meta, "metadata"))
+    c.write_json(run_dir / c.METADATA_FILE, meta)
+    c.emit({"approved": True, "budget": meta["budget"]})
+
+
 def cmd_count(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     meta = c.load_metadata(run_dir)
+    if args.n < 1:
+        c.die("--n must be a positive integer; invocations only ever accumulate")
     meta["invocations"][args.role] += args.n
     total = sum(meta["invocations"].values())
     over = meta["budget"] is not None and total > meta["budget"]
+    c.fail_if(c.validate_part(meta, "metadata"))
     c.write_json(run_dir / c.METADATA_FILE, meta)
     c.emit({"invocations": meta["invocations"], "total": total, "budget": meta["budget"], "over_budget": over})
     if over:
@@ -365,6 +393,15 @@ def cmd_set_status(args: argparse.Namespace) -> None:
     meta = c.load_metadata(run_dir)
     if args.status == "incomplete" and not args.reason:
         c.die("incomplete needs --reason")
+    if args.status == "complete" and (run_dir / c.LEDGER_FILE).exists():
+        # A complete run has nothing left undecided; otherwise it is incomplete
+        # with a reason, and the report says so.
+        units = c.read_json(run_dir / c.LEDGER_FILE)
+        cands = c.load_candidates(run_dir)
+        open_units = [u["coverage_id"] for u in units if isinstance(u, dict) and u.get("status") in ("planned", "in_progress")]
+        pending = [r["fingerprint"] for key in ("candidates", "carried") for r in cands[key]]
+        if open_units or pending:
+            c.die(f"the run is not complete: {len(open_units)} planned/in_progress unit(s), {len(pending)} undecided candidate(s); defer or decide them, or set incomplete with a reason")
     meta["run_status"] = args.status
     meta["incomplete_reason"] = args.reason if args.status == "incomplete" else None
     c.write_json(run_dir / c.METADATA_FILE, meta)
@@ -496,6 +533,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("run_dir")
     p.add_argument("n", type=int)
     p.set_defaults(func=cmd_set_budget)
+
+    p = sub.add_parser("approve")
+    p.add_argument("run_dir")
+    p.add_argument("--budget", type=int)
+    p.set_defaults(func=cmd_approve)
 
     p = sub.add_parser("count")
     p.add_argument("run_dir")
