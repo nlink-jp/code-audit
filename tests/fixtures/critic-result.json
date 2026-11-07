@@ -1,0 +1,26 @@
+{
+  "agent_id": "critic-1",
+  "missing_units": [
+    {
+      "surface": "repository tree",
+      "boundary": "committed secrets and debug toggles",
+      "subsystem": "app",
+      "attack_class": "Obvious things",
+      "canonical_refs": {
+        "surface": "repo#tree",
+        "boundary": "repo#secrets",
+        "subsystem": "app",
+        "attack_class": "classes/generic.md#Obvious things"
+      },
+      "starting_paths": ["app"],
+      "selected_classes": ["classes/generic.md#Obvious things"],
+      "excluded_classes": [],
+      "reason": "no unit checks for committed secrets or debug toggles"
+    }
+  ],
+  "reassign_ids": [
+    {"coverage_id": "__U2__", "reason": "the injection check did not read list_user_files, whose result flows to the caller"}
+  ],
+  "resolved_prior_leads": [],
+  "stop": false
+}

@@ -1,0 +1,121 @@
+{
+  "agent_id": "hunter-1",
+  "units": [
+    {
+      "coverage_id": "__U1__",
+      "disposition": "candidate",
+      "reviewed_paths": ["app/files.py"],
+      "checks": [
+        {
+          "agent_id": "hunter-1",
+          "reviewed_paths": ["app/files.py"],
+          "invariant": "a caller-supplied name cannot select a file outside base_dir",
+          "method": "source",
+          "result": "os.path.join accepts '../' and absolute names; no normalisation or prefix check before open",
+          "check_log": null
+        }
+      ],
+      "candidate_fingerprints": ["app/files.py:read_user_file:path-traversal", "app/files.py:read_user_file:symlink-escape", "app/files.py:list_user_files:enumeration"],
+      "unresolved": []
+    },
+    {
+      "coverage_id": "__U2__",
+      "disposition": "covered",
+      "reviewed_paths": ["app/files.py", "tests/test_files.py"],
+      "checks": [
+        {
+          "agent_id": "hunter-1",
+          "reviewed_paths": ["app/files.py", "tests/test_files.py"],
+          "invariant": "no caller-controlled value reaches a shell, query or template",
+          "method": "existing_test",
+          "result": "the module has no such sink; the existing test suite exercises the only two functions",
+          "check_log": "checks/unit-tests.log"
+        }
+      ],
+      "candidate_fingerprints": [],
+      "unresolved": []
+    }
+  ],
+  "candidates": [
+    {
+      "proposed_verdict": "confirmed",
+      "fingerprint": "app/files.py:read_user_file:path-traversal",
+      "title": "Path traversal in read_user_file",
+      "description": "A caller-supplied name containing '../' selects a file outside base_dir.",
+      "root_cause": "os.path.join is used without normalising the result or checking that it stays under base_dir.",
+      "intended_behavior": "Only files directly under base_dir are readable by name.",
+      "trace": [
+        {"kind": "entrypoint", "file": "app/files.py", "line": 6, "scope": "read_user_file", "description": "name arrives from the caller"},
+        {"kind": "propagation", "file": "app/files.py", "line": 9, "scope": "read_user_file", "description": "os.path.join(base_dir, name) keeps '../' components"},
+        {"kind": "sink", "file": "app/files.py", "line": 10, "scope": "read_user_file", "description": "open() reads the resolved path"}
+      ],
+      "evidence": [
+        {"file": "app/files.py", "line": 9, "description": "no normalisation of the joined path"},
+        {"file": "app/files.py", "line": 10, "description": "open() on the unchecked path"}
+      ],
+      "conditions": [{"kind": "input", "description": "the caller controls name"}],
+      "source_digests": {"app/files.py": "__D1__"},
+      "evidence_kind": "source",
+      "check_log": null,
+      "observed_result": "Source establishes that name='../secret' resolves to base_dir/../secret and is opened; no preventing layer exists in the module.",
+      "remediation": {
+        "strategy": "Resolve the joined path and require base_dir to be a parent of the resolved path before opening.",
+        "code_changes": [
+          {"file_name": "app/files.py", "fixed_code": "path = os.path.realpath(os.path.join(base_dir, name))\nif os.path.commonpath([path, os.path.realpath(base_dir)]) != os.path.realpath(base_dir):\n    raise ValueError(\"name escapes base_dir\")"}
+        ]
+      },
+      "severity": {
+        "likelihood": {"score": "high", "reason": "any caller of the function can pass '../'"},
+        "impact": {"score": "high", "reason": "reads any file the process can read"},
+        "overall": "high"
+      },
+      "confidence": {"score": "medium", "reason": "established from source by hunter and verifier; not observed at runtime"},
+      "coverage_ids": ["__U1__"]
+    },
+    {
+      "proposed_verdict": "needs_validation",
+      "fingerprint": "app/files.py:read_user_file:symlink-escape",
+      "title": "Symlink inside base_dir may escape it",
+      "description": "If base_dir contains a symlink to an outside directory, a name through it reads outside base_dir even after a prefix check.",
+      "claimed_root_cause": "No realpath before the confinement check that the remediation of the traversal finding would add.",
+      "trace": [
+        {"kind": "entrypoint", "file": "app/files.py", "line": 6, "scope": "read_user_file", "description": "name arrives from the caller"},
+        {"kind": "sink", "file": "app/files.py", "line": 10, "scope": "read_user_file", "description": "open() follows symlinks"}
+      ],
+      "evidence": [{"file": "app/files.py", "line": 10, "description": "open() follows symlinks by default"}],
+      "source_digests": {"app/files.py": "__D1__"},
+      "blockers": ["whether any deployment lets a lower-trust principal create entries inside base_dir is not visible in source"],
+      "validation_plan": {"local": "", "deployment": "the owner checks who can write inside the directories passed as base_dir"},
+      "coverage_ids": ["__U1__"]
+    },
+    {
+      "proposed_verdict": "needs_validation",
+      "fingerprint": "app/files.py:list_user_files:enumeration",
+      "title": "list_user_files reveals names of files the caller cannot read",
+      "description": "The listing returns every entry of base_dir regardless of per-file permission.",
+      "claimed_root_cause": "No per-entry authorisation in list_user_files.",
+      "trace": [
+        {"kind": "sink", "file": "app/files.py", "line": 14, "scope": "list_user_files", "description": "os.listdir returns every entry"}
+      ],
+      "evidence": [{"file": "app/files.py", "line": 14, "description": "unfiltered listdir"}],
+      "source_digests": {"app/files.py": "__D1__"},
+      "blockers": ["whether per-file permissions exist at all in this application is not visible in source"],
+      "validation_plan": {"local": "inspect the callers of list_user_files for a permission model", "deployment": ""},
+      "coverage_ids": ["__U1__"]
+    }
+  ],
+  "notes": [
+    {"kind": "hardening", "text": "read_user_file could refuse absolute names explicitly even after confinement is added.", "coverage_id": "__U1__"},
+    {"kind": "out_of_scope", "text": "The fixture Makefile's fetch target downloads over the network; recorded, not hunted."}
+  ],
+  "uncovered": [
+    {
+      "surface": "Makefile#fetch",
+      "boundary": "build inputs",
+      "subsystem": "build",
+      "attack_class": "Supply chain",
+      "starting_paths": ["Makefile"],
+      "reason": "a build target fetches an archive from the network without integrity verification"
+    }
+  ]
+}

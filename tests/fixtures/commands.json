@@ -1,0 +1,48 @@
+{
+  "commands": [
+    {
+      "id": "unit-tests",
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "tests", "-t", "."],
+      "cwd": ".",
+      "allowed": true,
+      "reason": "",
+      "env_allow": ["HOME"],
+      "timeout_sec": 120,
+      "writes": ["__pycache__"],
+      "source": "Makefile#test"
+    },
+    {
+      "id": "fetch-deps",
+      "argv": ["curl", "-sSf", "https://example.invalid/deps.tar.gz", "-o", "deps.tar.gz"],
+      "cwd": ".",
+      "allowed": false,
+      "reason": "reaches the network and writes a downloaded archive into the target",
+      "env_allow": [],
+      "timeout_sec": 60,
+      "writes": ["deps.tar.gz"],
+      "source": "Makefile#fetch"
+    },
+    {
+      "id": "env-probe",
+      "argv": ["python3", "-c", "import json, os; print(json.dumps(sorted(os.environ)))"],
+      "cwd": ".",
+      "allowed": true,
+      "reason": "",
+      "env_allow": ["HOME"],
+      "timeout_sec": 30,
+      "writes": [],
+      "source": "test fixture"
+    },
+    {
+      "id": "slow",
+      "argv": ["python3", "-c", "import time; time.sleep(5)"],
+      "cwd": ".",
+      "allowed": true,
+      "reason": "",
+      "env_allow": [],
+      "timeout_sec": 1,
+      "writes": [],
+      "source": "test fixture"
+    }
+  ]
+}

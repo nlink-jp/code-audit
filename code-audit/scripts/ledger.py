@@ -1,0 +1,885 @@
+#!/usr/bin/env python3
+"""Coverage ledger of a code-audit run (stdlib only).
+
+Usage:
+    ledger.py seed <run-dir> --target <dir> --units <proposals.json> [--prior <run-dir>]...
+    ledger.py assign <run-dir> --agent <id> <coverage-id>...
+    ledger.py record <run-dir> <hunter-result.json>
+    ledger.py merge-critic <run-dir> <critic-result.json>
+    ledger.py decide <run-dir> --fingerprint <fp> --verdict confirmed|needs_validation|rejected [--agent <id>]
+    ledger.py defer <run-dir> --reason TEXT (<coverage-id>... | --all-planned)
+    ledger.py estimate <run-dir> [--tokens-per-invocation N]
+    ledger.py validate <run-dir>
+    ledger.py status <run-dir>
+
+The ledger is the only coverage claim. Only this script writes
+coverage-ledger.json and candidates.json; it derives every coverage_id from
+the canonical references, enforces the unit state table, and refuses an
+update that would leave the ledger invalid.
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _contract as c  # noqa: E402
+
+VERDICTS = ("confirmed", "needs_validation", "rejected")
+EVIDENCE_STATES = ("blocked", "covered", "candidate")
+UNASSIGNED_REASON_STATES = ("not_applicable", "out_of_scope", "deferred")
+
+
+# ---------------------------------------------------------------------------
+# I/O
+# ---------------------------------------------------------------------------
+
+
+def load_ledger(run_dir: Path) -> list:
+    path = run_dir / c.LEDGER_FILE
+    if not path.exists():
+        c.die(f"{path}: not found; run 'ledger.py seed' first")
+    data = c.read_json(path)
+    if not isinstance(data, list):
+        c.die(f"{path}: expected a top-level array")
+    return data
+
+
+def save_ledger(run_dir: Path, units: list, candidates: dict) -> None:
+    units.sort(key=lambda u: u["coverage_id"])
+    errors = validate_ledger(run_dir, units, candidates)
+    c.fail_if(errors)
+    c.write_json(run_dir / c.LEDGER_FILE, units)
+    c.save_candidates(run_dir, candidates)
+
+
+def by_id(units: list) -> dict:
+    return {u["coverage_id"]: u for u in units}
+
+
+# ---------------------------------------------------------------------------
+# Unit construction
+# ---------------------------------------------------------------------------
+
+
+def build_unit(proposal: dict, profile: str, target: Path, where: str) -> tuple[dict | None, list[str]]:
+    errors = c.validate_part(proposal, "unit_proposal", where)
+    if errors:
+        return None, errors
+    refs = dict(proposal["canonical_refs"])
+    if profile == "quick":
+        refs["subsystem"] = c.QUICK_SUBSYSTEM_REF
+    for key, ref in refs.items():
+        err = c.canonical_ref_error(ref)
+        if err:
+            errors.append(f"{where}.canonical_refs.{key}: {err}")
+    for p in proposal["starting_paths"]:
+        if not c.is_repo_relative(p):
+            errors.append(f"{where}.starting_paths: '{p}' must be repository-relative")
+    if errors:
+        return None, errors
+    unit = {
+        "coverage_id": c.coverage_id(refs),
+        "canonical_refs": refs,
+        "surface": proposal["surface"],
+        "boundary": proposal["boundary"],
+        "subsystem": "all in-scope subsystems" if profile == "quick" else proposal["subsystem"],
+        "attack_class": proposal["attack_class"],
+        "starting_paths": sorted(set(proposal["starting_paths"])),
+        "selected_classes": list(proposal["selected_classes"]),
+        "excluded_classes": list(proposal["excluded_classes"]),
+        "prior_status": "none",
+        "source_digests": c.digests_for(target, proposal["starting_paths"]),
+        "attempts": [],
+        "wave": 1,
+        "status": "planned",
+        "agent_id": None,
+        "reviewed_paths": [],
+        "checks": [],
+        "result_fingerprints": [],
+        "unresolved": [],
+        "decisions": {},
+    }
+    if proposal.get("lifecycle"):
+        unit["lifecycle"] = proposal["lifecycle"]
+    if proposal.get("priority") is not None:
+        unit["priority"] = proposal["priority"]
+    return unit, []
+
+
+def add_units(units: list, new_units: list[dict], where: str) -> list[str]:
+    """Append new units, failing on an identity collision (same id, different
+    semantic tuple) or a duplicate (same tuple twice)."""
+    errors: list[str] = []
+    ids = by_id(units)
+    tuples = {c.semantic_tuple(u["canonical_refs"]): u["coverage_id"] for u in units}
+    for i, nu in enumerate(new_units):
+        cid, tup = nu["coverage_id"], c.semantic_tuple(nu["canonical_refs"])
+        if cid in ids:
+            if c.semantic_tuple(ids[cid]["canonical_refs"]) != tup:
+                errors.append(f"{where}[{i}]: canonical identity collision on {cid}")
+            else:
+                errors.append(f"{where}[{i}]: duplicate unit {cid}")
+            continue
+        if tup in tuples:
+            errors.append(f"{where}[{i}]: semantic tuple already present as {tuples[tup]}")
+            continue
+        units.append(nu)
+        ids[cid] = nu
+        tuples[tup] = cid
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+def validate_unit(run_dir: Path, unit: dict, index: int) -> list[str]:
+    base = f"ledger[{index}]"
+    errors = c.validate_part(unit, "unit", base)
+    if errors:
+        return errors
+    refs = unit["canonical_refs"]
+    for key, ref in refs.items():
+        err = c.canonical_ref_error(ref)
+        if err:
+            errors.append(f"{base}.canonical_refs.{key}: {err}")
+    if unit["coverage_id"] != c.coverage_id(refs):
+        errors.append(f"{base}.coverage_id: does not match its canonical references")
+    if ("lifecycle" in unit) != ("lifecycle" in refs):
+        errors.append(f"{base}: lifecycle and canonical_refs.lifecycle must appear together")
+    if unit["agent_id"] is not None and not c.is_agent_id(unit["agent_id"]):
+        errors.append(f"{base}.agent_id: not a canonical agent id")
+    for p in unit["starting_paths"]:
+        if not c.is_repo_relative(p):
+            errors.append(f"{base}.starting_paths: '{p}' must be repository-relative")
+    if set(unit["source_digests"]) != set(unit["starting_paths"]):
+        errors.append(f"{base}.source_digests: must digest exactly the starting paths")
+    status = unit["status"]
+    has_evidence = bool(unit["reviewed_paths"]) and bool(unit["checks"])
+    has_fps = bool(unit["result_fingerprints"])
+    has_unresolved = bool(unit["unresolved"])
+    if status == "planned":
+        if unit["agent_id"] is not None or has_evidence or unit["reviewed_paths"] or unit["checks"] or has_fps or has_unresolved:
+            errors.append(f"{base}: a planned unit is unassigned with empty evidence, fingerprints and unresolved")
+    elif status in UNASSIGNED_REASON_STATES:
+        if unit["agent_id"] is not None or unit["reviewed_paths"] or unit["checks"] or has_fps:
+            errors.append(f"{base}: a {status} unit is unassigned with empty evidence and fingerprints")
+        if not has_unresolved:
+            errors.append(f"{base}: a {status} unit needs a reason in unresolved")
+    elif status == "in_progress":
+        if unit["agent_id"] is None:
+            errors.append(f"{base}: an in_progress unit needs an assignment owner")
+        if unit["reviewed_paths"] or unit["checks"] or has_fps or has_unresolved:
+            errors.append(f"{base}: an in_progress unit has empty evidence, fingerprints and unresolved")
+    elif status in EVIDENCE_STATES:
+        if unit["agent_id"] is None:
+            errors.append(f"{base}: a {status} unit needs an assignment owner")
+        if not has_evidence:
+            errors.append(f"{base}: a {status} unit needs reviewed_paths and checks")
+        if status == "blocked" and (has_fps or not has_unresolved):
+            errors.append(f"{base}: a blocked unit has unresolved facts and no fingerprints")
+        if status == "covered" and (has_fps or has_unresolved):
+            errors.append(f"{base}: a covered unit has no fingerprints and nothing unresolved")
+        if status == "candidate" and not has_fps:
+            errors.append(f"{base}: a candidate unit needs result fingerprints")
+    errors += validate_checks(run_dir, unit["checks"], unit["reviewed_paths"], f"{base}.checks")
+    for fp in unit["result_fingerprints"]:
+        if not c.is_fingerprint(fp):
+            errors.append(f"{base}.result_fingerprints: '{fp}' is not a fingerprint")
+    for fp, verdict in unit["decisions"].items():
+        if verdict not in VERDICTS:
+            errors.append(f"{base}.decisions.{fp}: '{verdict}' is not a verdict")
+        if fp not in unit["result_fingerprints"]:
+            errors.append(f"{base}.decisions: '{fp}' is not among this unit's result fingerprints")
+    prev_wave = 0
+    for i, att in enumerate(unit["attempts"]):
+        ab = f"{base}.attempts[{i}]"
+        if att["wave"] <= prev_wave:
+            errors.append(f"{ab}.wave: archived waves must be strictly increasing")
+        if att["wave"] >= unit["wave"]:
+            errors.append(f"{ab}.wave: archived wave must precede the current wave")
+        if not c.is_agent_id(att["agent_id"]):
+            errors.append(f"{ab}.agent_id: not a canonical agent id")
+        if att["agent_id"] == unit["agent_id"]:
+            errors.append(f"{ab}.agent_id: a reassigned unit needs a fresh owner")
+        prev_wave = att["wave"]
+    return errors
+
+
+def validate_checks(run_dir: Path, checks: list, reviewed_paths: list, base: str) -> list[str]:
+    errors: list[str] = []
+    union: set[str] = set()
+    for i, chk in enumerate(checks):
+        cb = f"{base}[{i}]"
+        errs = c.validate_part(chk, "check", cb)
+        errors += errs
+        if errs:
+            continue
+        if not c.is_agent_id(chk["agent_id"]):
+            errors.append(f"{cb}.agent_id: not a canonical agent id")
+        for p in chk["reviewed_paths"]:
+            if not c.is_repo_relative(p):
+                errors.append(f"{cb}.reviewed_paths: '{p}' must be repository-relative")
+            union.add(p)
+        if chk["method"] == "source" and chk["check_log"] is not None:
+            errors.append(f"{cb}.check_log: a source check uses null")
+        if chk["method"] == "existing_test":
+            if chk["check_log"] is None:
+                errors.append(f"{cb}.check_log: an existing_test check needs its checks/ log")
+            elif not (run_dir / chk["check_log"]).is_file():
+                errors.append(f"{cb}.check_log: {chk['check_log']} does not exist in the run directory")
+    if checks and union != set(reviewed_paths):
+        errors.append(f"{base}: unit reviewed_paths must equal the union of its checks' reviewed_paths")
+    return errors
+
+
+def validate_ledger(run_dir: Path, units: list, candidates: dict) -> list[str]:
+    errors: list[str] = []
+    seen_ids: dict[str, int] = {}
+    seen_tuples: dict[tuple, int] = {}
+    for i, u in enumerate(units):
+        errors += validate_unit(run_dir, u, i)
+        if not isinstance(u, dict) or "coverage_id" not in u or "canonical_refs" not in u:
+            continue
+        cid = u["coverage_id"]
+        if cid in seen_ids:
+            errors.append(f"ledger[{i}].coverage_id: duplicate of ledger[{seen_ids[cid]}]")
+        seen_ids[cid] = i
+        try:
+            tup = c.semantic_tuple(u["canonical_refs"])
+        except KeyError:
+            continue
+        if tup in seen_tuples:
+            errors.append(f"ledger[{i}].canonical_refs: semantic tuple already used by ledger[{seen_tuples[tup]}]")
+        seen_tuples[tup] = i
+        if i > 0 and isinstance(units[i - 1], dict) and units[i - 1].get("coverage_id", "") > cid:
+            errors.append(f"ledger[{i}].coverage_id: units must be sorted lexicographically")
+    linked = {fp for u in units if isinstance(u, dict) for fp in u.get("result_fingerprints", [])}
+    for i, cand in enumerate(candidates.get("candidates", [])):
+        fp = cand.get("fingerprint")
+        if fp not in linked:
+            errors.append(f"candidates[{i}]: fingerprint '{fp}' is linked to no ledger unit")
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# seed
+# ---------------------------------------------------------------------------
+
+
+def load_prior(path: Path) -> dict:
+    meta = c.read_json(path / c.METADATA_FILE)
+    errs = c.validate_part(meta, "metadata", f"prior {path.name} metadata")
+    c.fail_if(errs)
+    ledger_path = path / c.LEDGER_FILE
+    ledger = c.read_json(ledger_path) if ledger_path.exists() else None
+    findings_path = path / c.FINDINGS_FILE
+    findings = c.read_json(findings_path) if findings_path.exists() else []
+    return {"run_id": meta["run_id"], "name": path.resolve().name, "ledger": ledger, "findings": findings, "profile": meta["profile"]}
+
+
+def prior_status_from_unit(pu: dict, current_digests: dict) -> str:
+    same = c.digests_unchanged(pu.get("source_digests", {}), current_digests)
+    status = pu["status"]
+    if status == "covered":
+        return "prior_covered_same_source" if same else "prior_covered_changed_source"
+    if status == "deferred":
+        return "prior_deferred"
+    if status == "blocked":
+        return "prior_blocked"
+    if status == "out_of_scope":
+        return "prior_out_of_scope"
+    if status == "candidate":
+        verdicts = set(pu.get("decisions", {}).values())
+        if "confirmed" in verdicts:
+            return "prior_confirmed_same_source" if same else "prior_confirmed_changed_source"
+        if "needs_validation" in verdicts:
+            return "prior_needs_validation"
+        if "rejected" in verdicts:
+            return "prior_covered_same_source" if same else "prior_rejected_claim_changed"
+        return "prior_blocked"
+    return "new"
+
+
+def cmd_seed(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    target = Path(args.target)
+    if not target.is_dir():
+        c.die(f"target is not a directory: {args.target}")
+    if (run_dir / c.LEDGER_FILE).exists():
+        c.die(f"{c.LEDGER_FILE} already exists; seed runs once per run")
+    meta = c.load_metadata(run_dir)
+    proposals = c.read_json(Path(args.units))
+    if not isinstance(proposals, list) or not proposals:
+        c.die("proposals must be a non-empty array of unit proposals")
+    units: list = []
+    built: list[dict] = []
+    errors: list[str] = []
+    for i, prop in enumerate(proposals):
+        unit, errs = build_unit(prop, meta["profile"], target, f"proposals[{i}]")
+        errors += errs
+        if unit:
+            built.append(unit)
+    c.fail_if(errors)
+    c.fail_if(add_units(units, built, "proposals"))
+
+    priors = [load_prior(Path(p)) for p in (args.prior or [])]
+    candidates = c.load_candidates(run_dir)
+    warnings: list[str] = []
+    ids = by_id(units)
+    if priors:
+        for u in units:
+            u["prior_status"] = "new"
+        for prior in priors:
+            if prior["ledger"] is None:
+                warnings.append(f"prior {prior['name']}: no ledger; treated as no coverage")
+                continue
+            for pu in prior["ledger"]:
+                cu = ids.get(pu.get("coverage_id"))
+                if cu is None:
+                    continue
+                cu["prior_status"] = prior_status_from_unit(pu, cu["source_digests"])
+        # A record-derived status outranks a unit-derived one, and among
+        # records the strongest prior claim wins for the unit.
+        rank = {"prior_confirmed_changed_source": 5, "prior_confirmed_same_source": 4, "prior_needs_validation": 3, "prior_rejected_claim_changed": 2}
+        proposed: dict[str, str] = {}
+
+        def propose(u: dict, status: str) -> None:
+            cur = proposed.get(u["coverage_id"])
+            if cur is None or rank[status] > rank[cur]:
+                proposed[u["coverage_id"]] = status
+
+        for prior in priors:
+            for rec in prior["findings"]:
+                fp, verdict = rec.get("fingerprint"), rec.get("verdict")
+                current = c.digests_for(target, rec.get("source_digests", {}).keys())
+                same = c.digests_unchanged(rec.get("source_digests", {}), current)
+                linked = [ids[x] for x in rec.get("coverage_ids", []) if x in ids]
+                if not linked:
+                    warnings.append(f"prior {prior['name']}: record {fp} links to no current unit")
+                carried = dict(rec)
+                carried["carried_from"] = prior["run_id"]
+                if verdict == "confirmed":
+                    for u in linked:
+                        propose(u, "prior_confirmed_same_source" if same else "prior_confirmed_changed_source")
+                    if same:
+                        candidates["carried"].append(carried)
+                elif verdict == "needs_validation":
+                    for u in linked:
+                        propose(u, "prior_needs_validation")
+                    if same:
+                        candidates["carried"].append(carried)
+                elif verdict == "rejected":
+                    if same:
+                        candidates["suppressed"].append({"fingerprint": fp, "title": rec.get("title", ""), "prior_run": prior["run_id"]})
+                    else:
+                        for u in linked:
+                            propose(u, "prior_rejected_claim_changed")
+        for cid, status in proposed.items():
+            ids[cid]["prior_status"] = status
+    save_ledger(run_dir, units, candidates)
+    c.emit({
+        "units": len(units),
+        "profile": meta["profile"],
+        "prior_runs": [p["name"] for p in priors],
+        "carried": [r["fingerprint"] for r in candidates["carried"]],
+        "suppressed": [r["fingerprint"] for r in candidates["suppressed"]],
+        "warnings": warnings,
+    })
+
+
+# ---------------------------------------------------------------------------
+# assign / record / merge-critic / decide / defer
+# ---------------------------------------------------------------------------
+
+
+def cmd_assign(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    if not c.is_agent_id(args.agent):
+        c.die(f"'{args.agent}' is not a canonical agent id (^[a-z0-9][a-z0-9_-]{{0,63}}$, no Windows device name)")
+    units = load_ledger(run_dir)
+    candidates = c.load_candidates(run_dir)
+    ids = by_id(units)
+    errors: list[str] = []
+    for cid in args.coverage_ids:
+        u = ids.get(cid)
+        if u is None:
+            errors.append(f"{cid}: no such unit")
+        elif u["status"] != "planned":
+            errors.append(f"{cid}: status is {u['status']}, only planned units can be assigned")
+        elif any(att["agent_id"] == args.agent for att in u["attempts"]):
+            errors.append(f"{cid}: {args.agent} already owned an archived attempt; a reassigned unit needs a fresh owner")
+    c.fail_if(errors)
+    for cid in args.coverage_ids:
+        ids[cid]["status"] = "in_progress"
+        ids[cid]["agent_id"] = args.agent
+    save_ledger(run_dir, units, candidates)
+    c.emit({"agent_id": args.agent, "assigned": list(args.coverage_ids)})
+
+
+def candidate_as_record(cand: dict, where: str) -> tuple[dict | None, list[str]]:
+    if not isinstance(cand, dict):
+        return None, [f"{where}: expected object"]
+    pv = cand.get("proposed_verdict")
+    if pv not in ("confirmed", "needs_validation"):
+        return None, [f"{where}.proposed_verdict: must be confirmed or needs_validation"]
+    rec = {k: v for k, v in cand.items() if k != "proposed_verdict"}
+    rec = {"verdict": pv, **rec}
+    return rec, []
+
+
+def record_errors(run_dir: Path | None, rec: dict, where: str) -> list[str]:
+    """Structural and semantic checks of one findings record. Shared in
+    spirit with findings.py; kept here so a hunter candidate is held to the
+    same bar before it enters the queue."""
+    verdict = rec.get("verdict")
+    part = {"confirmed": "finding_confirmed", "needs_validation": "finding_needs_validation", "rejected": "finding_rejected"}.get(verdict)
+    if part is None:
+        return [f"{where}.verdict: must be one of {list(VERDICTS)}"]
+    errors = c.validate_part(rec, part, where)
+    if errors:
+        return errors
+    for i, t in enumerate(rec["trace"]):
+        errors += c.validate_part(t, "trace_entry", f"{where}.trace[{i}]")
+    for i, e in enumerate(rec["evidence"]):
+        errors += c.validate_part(e, "evidence_entry", f"{where}.evidence[{i}]")
+    if errors:
+        return errors
+    for i, t in enumerate(rec["trace"]):
+        if not c.is_repo_relative(t["file"]):
+            errors.append(f"{where}.trace[{i}].file: must be repository-relative")
+    for i, e in enumerate(rec["evidence"]):
+        if not c.is_repo_relative(e["file"]):
+            errors.append(f"{where}.evidence[{i}].file: must be repository-relative")
+    trace = rec["trace"]
+    if len(trace) == 1:
+        if trace[0]["kind"] == "propagation":
+            errors.append(f"{where}.trace[0].kind: a one-entry trace is entrypoint or sink")
+    else:
+        if trace[0]["kind"] != "entrypoint":
+            errors.append(f"{where}.trace[0].kind: a multi-entry trace starts at entrypoint")
+        if trace[-1]["kind"] != "sink":
+            errors.append(f"{where}.trace[{len(trace) - 1}].kind: a multi-entry trace ends at sink")
+        for i, t in enumerate(trace[1:-1], start=1):
+            if t["kind"] != "propagation":
+                errors.append(f"{where}.trace[{i}].kind: intermediate entries are propagation")
+    if not rec["source_digests"]:
+        errors.append(f"{where}.source_digests: must digest the cited paths")
+    for k in rec["source_digests"]:
+        if not c.is_repo_relative(k):
+            errors.append(f"{where}.source_digests: '{k}' must be repository-relative")
+    if verdict == "confirmed":
+        sev = rec["severity"]
+        if c.IMPACT_ORDER.index(sev["overall"]) > c.IMPACT_ORDER.index(sev["impact"]["score"]):
+            errors.append(f"{where}.severity.overall: cannot exceed demonstrated impact {sev['impact']['score']}")
+        if rec["evidence_kind"] == "source":
+            if rec["check_log"] is not None:
+                errors.append(f"{where}.check_log: source evidence uses null")
+            if rec["confidence"]["score"] == "high":
+                errors.append(f"{where}.confidence.score: source-only evidence caps confidence at medium (references/severity.md rule 2)")
+        else:
+            if rec["check_log"] is None:
+                errors.append(f"{where}.check_log: existing_test evidence needs its checks/ log")
+            elif run_dir is not None and not (run_dir / rec["check_log"]).is_file():
+                errors.append(f"{where}.check_log: {rec['check_log']} does not exist in the run directory")
+        for i, chg in enumerate(rec["remediation"]["code_changes"]):
+            if not c.is_repo_relative(chg["file_name"]):
+                errors.append(f"{where}.remediation.code_changes[{i}].file_name: must be repository-relative")
+    elif verdict == "needs_validation":
+        plan = rec["validation_plan"]
+        if not any(str(plan.get(k, "")).strip() for k in ("local", "deployment")):
+            errors.append(f"{where}.validation_plan: needs a non-empty local or deployment plan")
+    return errors
+
+
+def cmd_record(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    result = c.read_json(Path(args.result))
+    errors = c.validate_part(result, "hunter_result", "result")
+    c.fail_if(errors)
+    agent = result["agent_id"]
+    if not c.is_agent_id(agent):
+        c.die(f"result.agent_id: '{agent}' is not a canonical agent id")
+    units = load_ledger(run_dir)
+    candidates = c.load_candidates(run_dir)
+    ids = by_id(units)
+    owned = {u["coverage_id"] for u in units if u["status"] == "in_progress" and u["agent_id"] == agent}
+    reported: dict[str, dict] = {}
+    for i, ru in enumerate(result["units"]):
+        rb = f"result.units[{i}]"
+        cid = ru["coverage_id"]
+        if cid in reported:
+            errors.append(f"{rb}: coverage_id reported twice")
+            continue
+        reported[cid] = ru
+        u = ids.get(cid)
+        if u is None:
+            errors.append(f"{rb}: no such unit")
+            continue
+        if cid not in owned:
+            errors.append(f"{rb}: unit is not in_progress under {agent}")
+            continue
+        union: set[str] = set()
+        for chk in ru["checks"]:
+            if isinstance(chk, dict):
+                if chk.get("agent_id") != agent:
+                    errors.append(f"{rb}.checks: every check is owned by {agent}")
+                union.update(chk.get("reviewed_paths", []) if isinstance(chk.get("reviewed_paths"), list) else [])
+        if ru["reviewed_paths"] and set(ru["reviewed_paths"]) != union:
+            errors.append(f"{rb}.reviewed_paths: must equal the union of the checks' reviewed_paths")
+        ru["reviewed_paths"] = sorted(union)
+        errors += validate_checks(run_dir, ru["checks"], ru["reviewed_paths"], f"{rb}.checks")
+        disp = ru["disposition"]
+        if not ru["checks"]:
+            errors.append(f"{rb}: a {disp} disposition needs at least one check")
+        if disp == "covered" and (ru["candidate_fingerprints"] or ru["unresolved"]):
+            errors.append(f"{rb}: covered carries no fingerprints and nothing unresolved")
+        if disp == "blocked" and (ru["candidate_fingerprints"] or not ru["unresolved"]):
+            errors.append(f"{rb}: blocked carries unresolved facts and no fingerprints")
+        if disp == "candidate" and not ru["candidate_fingerprints"]:
+            errors.append(f"{rb}: candidate needs fingerprints")
+        for fp in ru["candidate_fingerprints"]:
+            if not c.is_fingerprint(fp):
+                errors.append(f"{rb}.candidate_fingerprints: '{fp}' is not a fingerprint")
+    missing = owned - set(reported)
+    if missing:
+        errors.append(f"result.units: every unit assigned to {agent} appears exactly once; missing {sorted(missing)}")
+    claimed = {fp for ru in reported.values() for fp in ru["candidate_fingerprints"]}
+    known = {r["fingerprint"] for key in ("candidates", "carried", "decided") for r in candidates.get(key, [])}
+    accepted: list[dict] = []
+    duplicates: list[str] = []
+    for i, cand in enumerate(result["candidates"]):
+        cb = f"result.candidates[{i}]"
+        rec, errs = candidate_as_record(cand, cb)
+        errors += errs
+        if rec is None:
+            continue
+        errs = record_errors(run_dir, rec, cb)
+        errors += errs
+        if errs:
+            continue
+        if rec["fingerprint"] not in claimed:
+            errors.append(f"{cb}.fingerprint: not listed in any reported unit's candidate_fingerprints")
+            continue
+        if not set(rec["coverage_ids"]) <= set(reported):
+            errors.append(f"{cb}.coverage_ids: must be among the reported units")
+            continue
+        if rec["fingerprint"] in known or any(a["fingerprint"] == rec["fingerprint"] for a in accepted):
+            duplicates.append(rec["fingerprint"])
+            continue
+        rec["agent_id"] = agent
+        accepted.append(rec)
+    for fp in claimed:
+        if not any(a["fingerprint"] == fp for a in accepted) and fp not in duplicates and fp not in known:
+            errors.append(f"result.candidates: fingerprint '{fp}' is claimed by a unit but no candidate record was returned")
+    c.fail_if(errors)
+    for cid, ru in reported.items():
+        u = ids[cid]
+        u["status"] = ru["disposition"]
+        u["reviewed_paths"] = ru["reviewed_paths"]
+        u["checks"] = ru["checks"]
+        u["result_fingerprints"] = list(ru["candidate_fingerprints"])
+        u["unresolved"] = list(ru["unresolved"])
+        if duplicates:
+            u.setdefault("notes", []).extend(f"duplicate candidate fingerprint {fp} not queued twice" for fp in duplicates if fp in ru["candidate_fingerprints"])
+    candidates["candidates"].extend(accepted)
+    for unc in result["uncovered"]:
+        candidates["uncovered"].append({**unc, "agent_id": agent})
+    notes = c.load_notes(run_dir)
+    for n in result["notes"]:
+        notes.append({"agent_id": agent, **n})
+    save_ledger(run_dir, units, candidates)
+    c.save_notes(run_dir, notes)
+    c.emit({
+        "agent_id": agent,
+        "units": {cid: ru["disposition"] for cid, ru in reported.items()},
+        "queued_candidates": [a["fingerprint"] for a in accepted],
+        "duplicate_candidates": duplicates,
+        "uncovered": len(result["uncovered"]),
+        "notes": len(result["notes"]),
+    })
+
+
+def archive_attempt(u: dict, reason: str) -> None:
+    u["attempts"].append({
+        "wave": u["wave"],
+        "status": u["status"],
+        "agent_id": u["agent_id"],
+        "reviewed_paths": u["reviewed_paths"],
+        "checks": u["checks"],
+        "result_fingerprints": u["result_fingerprints"],
+        "unresolved": u["unresolved"],
+        "reassignment_reason": reason,
+    })
+    u["wave"] += 1
+    u["agent_id"] = None
+    u["reviewed_paths"], u["checks"], u["result_fingerprints"], u["unresolved"] = [], [], [], []
+
+
+def cmd_merge_critic(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    meta = c.load_metadata(run_dir)
+    target = Path(args.target)
+    if not target.is_dir():
+        c.die(f"target is not a directory: {args.target}")
+    critic = c.read_json(Path(args.result))
+    errors = c.validate_part(critic, "critic_result", "critic")
+    c.fail_if(errors)
+    quick = meta["profile"] == "quick"
+    units = load_ledger(run_dir)
+    candidates = c.load_candidates(run_dir)
+    ids = by_id(units)
+    new_units: list[dict] = []
+    for i, prop in enumerate(critic["missing_units"]):
+        unit, errs = build_unit(prop, meta["profile"], target, f"critic.missing_units[{i}]")
+        errors += errs
+        if unit:
+            if quick:
+                unit["status"] = "deferred"
+                unit["unresolved"] = [f"quick_profile_final_critic: {prop.get('reason', 'proposed by the final critic')}"]
+            new_units.append(unit)
+    for i, ra in enumerate(critic["reassign_ids"]):
+        u = ids.get(ra["coverage_id"])
+        if u is None:
+            errors.append(f"critic.reassign_ids[{i}]: no such unit")
+        elif u["status"] not in EVIDENCE_STATES:
+            errors.append(f"critic.reassign_ids[{i}]: only blocked, covered or candidate units can be reassigned (is {u['status']})")
+    c.fail_if(errors)
+    already = [nu["coverage_id"] for nu in new_units if nu["coverage_id"] in ids]
+    fresh = [nu for nu in new_units if nu["coverage_id"] not in ids]
+    c.fail_if(add_units(units, fresh, "critic.missing_units"))
+    reassigned: list[str] = []
+    for ra in critic["reassign_ids"]:
+        u = ids[ra["coverage_id"]]
+        archive_attempt(u, ra["reason"])
+        if quick:
+            u["status"] = "deferred"
+            u["unresolved"] = [f"quick_profile_final_critic: {ra['reason']}"]
+        else:
+            u["status"] = "planned"
+        reassigned.append(u["coverage_id"])
+    resolved: list[str] = []
+    for lead in critic["resolved_prior_leads"]:
+        fp = lead["fingerprint"]
+        keep = [r for r in candidates["carried"] if r["fingerprint"] != fp]
+        if len(keep) != len(candidates["carried"]):
+            candidates["carried"] = keep
+            candidates["resolved_prior_leads"].append({**lead, "agent_id": critic["agent_id"]})
+            resolved.append(fp)
+    save_ledger(run_dir, units, candidates)
+    planned = [u["coverage_id"] for u in units if u["status"] == "planned"]
+    c.emit({
+        "added": [nu["coverage_id"] for nu in fresh],
+        "added_as": "deferred" if quick else "planned",
+        "already_present": already,
+        "reassigned": reassigned,
+        "resolved_prior_leads": resolved,
+        "critic_stop": critic["stop"],
+        "work_remaining": bool(planned) and not quick,
+        "planned": planned,
+    })
+
+
+def cmd_decide(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    fp, verdict = args.fingerprint, args.verdict
+    findings = c.load_findings(run_dir)
+    rec = next((r for r in findings if r.get("fingerprint") == fp), None)
+    if rec is None:
+        c.die(f"{fp}: not in {c.FINDINGS_FILE}; add the record with findings.py first")
+    if rec.get("verdict") != verdict:
+        c.die(f"{fp}: {c.FINDINGS_FILE} says {rec.get('verdict')}, not {verdict}")
+    units = load_ledger(run_dir)
+    candidates = c.load_candidates(run_dir)
+    ids = by_id(units)
+    pending = [r for r in candidates["candidates"] if r["fingerprint"] == fp] + [r for r in candidates["carried"] if r["fingerprint"] == fp]
+    if not pending:
+        c.die(f"{fp}: not a pending candidate")
+    linked = [u for u in units if fp in u["result_fingerprints"]]
+    if not linked:
+        for cid in rec.get("coverage_ids", []):
+            u = ids.get(cid)
+            if u is None:
+                continue
+            if u["status"] == "planned":
+                if not args.agent or not c.is_agent_id(args.agent):
+                    c.die(f"{fp}: linking a carried record to planned unit {cid} needs --agent (the verifier becomes the owner)")
+                files = sorted({e["file"] for e in rec["evidence"]})
+                u["status"] = "candidate"
+                u["agent_id"] = args.agent
+                u["reviewed_paths"] = files
+                u["checks"] = [{"agent_id": args.agent, "reviewed_paths": files, "invariant": rec["title"], "method": "source", "result": f"carried record re-checked: {verdict}", "check_log": None}]
+                u["result_fingerprints"] = [fp]
+                linked.append(u)
+            elif u["status"] in EVIDENCE_STATES and fp not in u["result_fingerprints"]:
+                u["result_fingerprints"].append(fp)
+                if u["status"] != "candidate":
+                    u["status"] = "candidate"
+                linked.append(u)
+    if not linked:
+        c.die(f"{fp}: no ledger unit links this fingerprint")
+    for u in linked:
+        u["decisions"][fp] = verdict
+    candidates["candidates"] = [r for r in candidates["candidates"] if r["fingerprint"] != fp]
+    candidates["carried"] = [r for r in candidates["carried"] if r["fingerprint"] != fp]
+    candidates["decided"].append({"fingerprint": fp, "verdict": verdict})
+    save_ledger(run_dir, units, candidates)
+    c.emit({"fingerprint": fp, "verdict": verdict, "units": [u["coverage_id"] for u in linked], "pending": len(candidates["candidates"]) + len(candidates["carried"])})
+
+
+def cmd_defer(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    units = load_ledger(run_dir)
+    candidates = c.load_candidates(run_dir)
+    ids = by_id(units)
+    targets = [u for u in units if u["status"] == "planned"] if args.all_planned else [ids[x] for x in args.coverage_ids if x in ids]
+    unknown = [x for x in (args.coverage_ids or []) if x not in ids]
+    if unknown:
+        c.die(f"no such unit: {unknown}")
+    bad = [u["coverage_id"] for u in targets if u["status"] != "planned"]
+    if bad:
+        c.die(f"only planned units can be deferred: {bad}")
+    for u in targets:
+        u["status"] = "deferred"
+        u["unresolved"] = [args.reason]
+    save_ledger(run_dir, units, candidates)
+    c.emit({"deferred": [u["coverage_id"] for u in targets], "reason": args.reason})
+
+
+# ---------------------------------------------------------------------------
+# estimate / validate / status
+# ---------------------------------------------------------------------------
+
+
+def counts(units: list) -> dict:
+    out: dict[str, int] = {}
+    for u in units:
+        out[u["status"]] = out.get(u["status"], 0) + 1
+    return out
+
+
+def cmd_estimate(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    meta = c.load_metadata(run_dir)
+    units = load_ledger(run_dir)
+    candidates = c.load_candidates(run_dir)
+    quick = meta["profile"] == "quick"
+    planned = sum(1 for u in units if u["status"] == "planned")
+    pending = len(candidates["candidates"]) + len(candidates["carried"])
+    stages = 1 if quick else 2
+    critics = 1 if quick else 3
+    expected_candidates = pending + max(1, math.ceil(planned * 0.3))
+    verifiers = expected_candidates * stages
+    spent = sum(meta["invocations"].values())
+    total = spent + planned + critics + verifiers
+    est = {
+        "profile": meta["profile"],
+        "spent": spent,
+        "hunters": planned,
+        "critics": critics,
+        "verification_stages": stages,
+        "expected_candidates": expected_candidates,
+        "verifiers": verifiers,
+        "total_invocations": total,
+        "tokens_per_invocation": args.tokens_per_invocation,
+        "tokens_estimate": total * args.tokens_per_invocation if args.tokens_per_invocation else None,
+        "budget": meta["budget"],
+        "fits_budget": meta["budget"] is None or total <= meta["budget"],
+        "reserve_for_critics_and_verifiers": critics + verifiers,
+    }
+    c.emit(est)
+
+
+def cmd_validate(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    units = load_ledger(run_dir)
+    candidates = c.load_candidates(run_dir)
+    c.fail_if(validate_ledger(run_dir, units, candidates))
+    c.emit({"ok": True, "units": len(units), "counts": counts(units)})
+
+
+def cmd_status(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    units = load_ledger(run_dir)
+    candidates = c.load_candidates(run_dir)
+    c.emit({
+        "units": len(units),
+        "counts": counts(units),
+        "planned": [u["coverage_id"] for u in units if u["status"] == "planned"],
+        "pending_candidates": [r["fingerprint"] for r in candidates["candidates"]],
+        "pending_carried": [r["fingerprint"] for r in candidates["carried"]],
+        "decided": candidates["decided"],
+        "uncovered": len(candidates["uncovered"]),
+        "suppressed": [r["fingerprint"] for r in candidates["suppressed"]],
+    })
+
+
+# ---------------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("seed")
+    p.add_argument("run_dir")
+    p.add_argument("--target", required=True)
+    p.add_argument("--units", required=True)
+    p.add_argument("--prior", action="append")
+    p.set_defaults(func=cmd_seed)
+
+    p = sub.add_parser("assign")
+    p.add_argument("run_dir")
+    p.add_argument("--agent", required=True)
+    p.add_argument("coverage_ids", nargs="+")
+    p.set_defaults(func=cmd_assign)
+
+    p = sub.add_parser("record")
+    p.add_argument("run_dir")
+    p.add_argument("result")
+    p.set_defaults(func=cmd_record)
+
+    p = sub.add_parser("merge-critic")
+    p.add_argument("run_dir")
+    p.add_argument("result")
+    p.add_argument("--target", required=True)
+    p.set_defaults(func=cmd_merge_critic)
+
+    p = sub.add_parser("decide")
+    p.add_argument("run_dir")
+    p.add_argument("--fingerprint", required=True)
+    p.add_argument("--verdict", required=True, choices=VERDICTS)
+    p.add_argument("--agent")
+    p.set_defaults(func=cmd_decide)
+
+    p = sub.add_parser("defer")
+    p.add_argument("run_dir")
+    p.add_argument("--reason", required=True)
+    p.add_argument("--all-planned", action="store_true")
+    p.add_argument("coverage_ids", nargs="*")
+    p.set_defaults(func=cmd_defer)
+
+    p = sub.add_parser("estimate")
+    p.add_argument("run_dir")
+    p.add_argument("--tokens-per-invocation", type=int)
+    p.set_defaults(func=cmd_estimate)
+
+    p = sub.add_parser("validate")
+    p.add_argument("run_dir")
+    p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("status")
+    p.add_argument("run_dir")
+    p.set_defaults(func=cmd_status)
+
+    args = parser.parse_args(argv)
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

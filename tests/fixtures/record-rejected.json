@@ -1,0 +1,14 @@
+{
+  "verdict": "rejected",
+  "fingerprint": "app/files.py:list_user_files:enumeration",
+  "title": "list_user_files reveals names of files the caller cannot read",
+  "description": "The listing returns every entry of base_dir regardless of per-file permission.",
+  "claimed_root_cause": "No per-entry authorisation in list_user_files.",
+  "trace": [
+    {"kind": "sink", "file": "app/files.py", "line": 14, "scope": "list_user_files", "description": "os.listdir returns every entry"}
+  ],
+  "evidence": [{"file": "app/files.py", "line": 14, "description": "unfiltered listdir"}],
+  "source_digests": {"app/files.py": "__D1__"},
+  "reason": "The application has no per-file permission model: every caller may read every file under base_dir, so listing names crosses no boundary.",
+  "coverage_ids": ["__U1__"]
+}

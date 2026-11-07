@@ -1,0 +1,34 @@
+[
+  {
+    "surface": "read_user_file(base_dir, name) — name from the caller",
+    "boundary": "base_dir confinement in app/files.py",
+    "subsystem": "app",
+    "attack_class": "Resource and file handling",
+    "canonical_refs": {
+      "surface": "app/files.py#read_user_file",
+      "boundary": "app/files.py#base_dir",
+      "subsystem": "app",
+      "attack_class": "classes/generic.md#Resource and file handling"
+    },
+    "starting_paths": ["app/files.py"],
+    "selected_classes": ["classes/generic.md#Resource and file handling"],
+    "excluded_classes": [{"block": "classes/mcp-server.md#Writes outside the declared work directory", "reason": "the fixture is not an MCP server"}],
+    "priority": 1
+  },
+  {
+    "surface": "read_user_file(base_dir, name) — name from the caller",
+    "boundary": "base_dir confinement in app/files.py",
+    "subsystem": "app",
+    "attack_class": "Injection",
+    "canonical_refs": {
+      "surface": "app/files.py#read_user_file",
+      "boundary": "app/files.py#base_dir",
+      "subsystem": "app",
+      "attack_class": "classes/generic.md#Injection"
+    },
+    "starting_paths": ["app/files.py", "tests/test_files.py"],
+    "selected_classes": ["classes/generic.md#Injection"],
+    "excluded_classes": [],
+    "priority": 2
+  }
+]
