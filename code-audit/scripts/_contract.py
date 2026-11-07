@@ -369,11 +369,17 @@ def load_metadata(run_dir: Path) -> dict:
     return data  # type: ignore[return-value]
 
 
+CANDIDATE_KEYS = ("candidates", "carried", "decided", "suppressed", "uncovered", "resolved_prior_leads", "unlinked_prior")
+
+
 def load_candidates(run_dir: Path) -> dict:
     path = run_file(run_dir, CANDIDATES_FILE)
-    if not path.exists():
-        return {"candidates": [], "carried": [], "decided": [], "suppressed": [], "uncovered": [], "resolved_prior_leads": []}
-    return read_json(path)  # type: ignore[return-value]
+    data = read_json(path) if path.exists() else {}
+    if not isinstance(data, dict):
+        die(f"{path}: expected an object")
+    for key in CANDIDATE_KEYS:
+        data.setdefault(key, [])
+    return data
 
 
 def save_candidates(run_dir: Path, data: dict) -> None:

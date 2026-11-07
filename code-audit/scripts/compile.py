@@ -48,7 +48,7 @@ L = {
         "th_blockers": "未解決の事実", "th_local": "手元での確認", "th_deploy": "配備側で観測する確認", "claimed": "主張された根本原因", "blockers": "未解決の事実", "plan": "確認の手順",
         "local": "手元", "deployment": "配備側",
         "notes": "覚え書き", "hardening": "強化の提案（所見ではない）", "out_of_scope": "範囲外の観察",
-        "coverage": "網羅の要約", "th_status": "状態", "th_count": "件数", "deferred_units": "先送り・範囲外の単位と理由", "uncovered": "次の波に回すべき未割当の面", "unverified": "検証に至らなかった候補（判定なし・深刻度なし）",
+        "coverage": "網羅の要約", "th_status": "状態", "th_count": "件数", "deferred_units": "先送り・範囲外の単位と理由", "uncovered": "次の波に回すべき未割当の面", "unverified": "検証に至らなかった候補（判定なし・深刻度なし）", "undecided": "台帳の判定が無いレコード（所見として報告しない）", "unlinked_prior": "今回の単位に結び付かない前回のレコード（判定なし）",
         "rejected": "反証された候補", "rejected_line": "反証された候補は所見ではありません。次回の再報告を抑えるために fingerprint だけを記します: {fps}",
         "carried": "持ち越し", "suppressed": "前回 rejected のまま抑止した主張",
         "nv_title": "code-audit 検証待ちの手がかり",
@@ -77,7 +77,7 @@ L = {
         "th_blockers": "Unresolved facts", "th_local": "Local check", "th_deploy": "Owner-observed check", "claimed": "Claimed root cause", "blockers": "Unresolved facts", "plan": "Validation plan",
         "local": "local", "deployment": "deployment",
         "notes": "Notes", "hardening": "Hardening notes (not findings)", "out_of_scope": "Out-of-scope observations",
-        "coverage": "Coverage summary", "th_status": "Status", "th_count": "Count", "deferred_units": "Deferred and out-of-scope units with reasons", "uncovered": "Unassigned surfaces for a later wave", "unverified": "Candidates not verified (no verdict, no severity)",
+        "coverage": "Coverage summary", "th_status": "Status", "th_count": "Count", "deferred_units": "Deferred and out-of-scope units with reasons", "uncovered": "Unassigned surfaces for a later wave", "unverified": "Candidates not verified (no verdict, no severity)", "undecided": "Records without a ledger decision (not reported as findings)", "unlinked_prior": "Prior records that no current unit covers (no verdict)",
         "rejected": "Rejected candidates", "rejected_line": "Rejected candidates are not findings. Only their fingerprints are listed so the next run does not repeat the claim: {fps}",
         "carried": "carried", "suppressed": "claims suppressed as rejected in a prior run",
         "nv_title": "code-audit leads awaiting validation",
@@ -122,6 +122,9 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
     replacements = replacements or []
     t = L[lang]
     uid = {u["coverage_id"]: u for u in units}
+    decided = {d["fingerprint"]: d["verdict"] for d in candidates.get("decided", [])}
+    undecided = [r for r in findings if decided.get(r["fingerprint"]) != r["verdict"]]
+    findings = [r for r in findings if decided.get(r["fingerprint"]) == r["verdict"]]
     confirmed = sorted((r for r in findings if r["verdict"] == "confirmed"), key=lambda r: (SEVERITY_RANK[r["severity"]["overall"]], r["fingerprint"]))
     nv = [r for r in findings if r["verdict"] == "needs_validation"]
     rejected = [r for r in findings if r["verdict"] == "rejected"]
@@ -256,6 +259,18 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
         for u in reasoned:
             out.append(f"- `{plain(u['coverage_id'])}` ({u['status']}): {plain('; '.join(u['unresolved']))}")
         out.append("")
+    if undecided:
+        out.append(f"### {t['undecided']}")
+        out.append("")
+        for r in undecided:
+            out.append(f"- `{plain(r['fingerprint'])}`: {plain(r.get('title', ''))}")
+        out.append("")
+    if candidates.get("unlinked_prior"):
+        out.append(f"### {t['unlinked_prior']}")
+        out.append("")
+        for r in candidates["unlinked_prior"]:
+            out.append(f"- `{plain(r['fingerprint'])}` ({plain(r['prior_run'])}, {plain(r['verdict'])}): {plain(r.get('title', ''))}")
+        out.append("")
     pending = list(candidates.get("candidates", [])) + list(candidates.get("carried", []))
     if pending:
         out.append(f"### {t['unverified']}")
@@ -281,6 +296,11 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
         out.append(t["rejected_line"].format(fps=", ".join(f"`{plain(r['fingerprint'])}`" for r in rejected)))
         out.append("")
     return "\n".join(out).rstrip("\n") + "\n"
+
+
+def decided_only(findings: list, candidates: dict) -> list:
+    decided = {d["fingerprint"]: d["verdict"] for d in candidates.get("decided", [])}
+    return [r for r in findings if decided.get(r["fingerprint"]) == r["verdict"]]
 
 
 def render_needs_validation(lang: str, meta: dict, findings: list) -> str:
@@ -341,9 +361,10 @@ def main(argv: list[str] | None = None) -> None:
     written = []
     for lang, name, nv_name in (("ja", "REPORT.ja.md", "NEEDS-VALIDATION.ja.md"), ("en", "REPORT.md", "NEEDS-VALIDATION.md")):
         (run_dir / name).write_text(render_report(lang, meta, units, findings, candidates, notes, replacements), encoding="utf-8")
-        (run_dir / nv_name).write_text(render_needs_validation(lang, meta, findings), encoding="utf-8")
+        (run_dir / nv_name).write_text(render_needs_validation(lang, meta, decided_only(findings, candidates)), encoding="utf-8")
         written += [name, nv_name]
-    c.emit({"written": written, "confirmed": sum(1 for r in findings if r["verdict"] == "confirmed"), "needs_validation": sum(1 for r in findings if r["verdict"] == "needs_validation"), "rejected": sum(1 for r in findings if r["verdict"] == "rejected")})
+    reported = decided_only(findings, candidates)
+    c.emit({"written": written, "confirmed": sum(1 for r in reported if r["verdict"] == "confirmed"), "needs_validation": sum(1 for r in reported if r["verdict"] == "needs_validation"), "rejected": sum(1 for r in reported if r["verdict"] == "rejected"), "undecided": len(findings) - len(reported)})
 
 
 if __name__ == "__main__":

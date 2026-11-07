@@ -239,6 +239,40 @@ def validate_checks(run_dir: Path, checks: list, reviewed_paths: list, base: str
     return errors
 
 
+def cross_check(findings: list, units: list, candidates: dict) -> list[str]:
+    """The findings file and the ledger describe one run: every record is a
+    decided candidate of this run with the verdict the ledger recorded, every
+    decision has its record, and every coverage id a record cites exists.
+    Checked by `ledger.py validate` and `findings.py validate`, not on every
+    save, so the parent can repair an inconsistency with the next step
+    (`decide` after a replacement) instead of being locked out."""
+    errors: list[str] = []
+    ids = {u["coverage_id"] for u in units if isinstance(u, dict)}
+    decided = {d["fingerprint"]: d["verdict"] for d in candidates.get("decided", [])}
+    pending = {r["fingerprint"] for key in ("candidates", "carried") for r in candidates.get(key, [])}
+    by_fp = {r.get("fingerprint"): r for r in findings if isinstance(r, dict)}
+    for i, rec in enumerate(findings):
+        if not isinstance(rec, dict):
+            continue
+        fp = rec.get("fingerprint")
+        if fp in decided:
+            if decided[fp] != rec.get("verdict"):
+                errors.append(f"findings[{i}] {fp}: record says {rec.get('verdict')} but the ledger decided {decided[fp]}; run ledger.py decide again")
+        elif fp in pending:
+            errors.append(f"findings[{i}] {fp}: record added but not decided; run ledger.py decide")
+        else:
+            errors.append(f"findings[{i}] {fp}: not a candidate of this run")
+        for cid in rec.get("coverage_ids", []):
+            if cid not in ids:
+                errors.append(f"findings[{i}] {fp}: coverage id {cid} is not in the ledger")
+    for fp, verdict in decided.items():
+        if fp not in by_fp:
+            errors.append(f"decided {fp}: no record in {c.FINDINGS_FILE}")
+        elif by_fp[fp].get("verdict") != verdict:
+            pass  # reported above from the record's side
+    return errors
+
+
 def validate_ledger(run_dir: Path, units: list, candidates: dict) -> list[str]:
     errors: list[str] = []
     seen_ids: dict[str, int] = {}
@@ -381,7 +415,12 @@ def cmd_seed(args: argparse.Namespace) -> None:
                 same = c.digests_unchanged(rec.get("source_digests", {}), current)
                 linked = [ids[x] for x in rec.get("coverage_ids", []) if x in ids]
                 if not linked:
-                    warnings.append(f"prior {prior['name']}: record {fp} links to no current unit")
+                    # No current unit covers it (a quick prior under standard,
+                    # or a surface that no longer exists): nothing can decide
+                    # it this run, so it is reported, not queued.
+                    warnings.append(f"prior {prior['name']}: record {fp} links to no current unit; listed as unlinked_prior")
+                    candidates["unlinked_prior"].append({"fingerprint": fp, "title": rec.get("title", ""), "verdict": verdict, "prior_run": prior["run_id"], "reason": "no current unit has its coverage ids"})
+                    continue
                 carried = dict(rec)
                 carried["carried_from"] = prior["run_id"]
                 if verdict == "confirmed":
@@ -409,6 +448,7 @@ def cmd_seed(args: argparse.Namespace) -> None:
         "prior_runs": [p["name"] for p in priors],
         "carried": [r["fingerprint"] for r in candidates["carried"]],
         "suppressed": [r["fingerprint"] for r in candidates["suppressed"]],
+        "unlinked_prior": [r["fingerprint"] for r in candidates["unlinked_prior"]],
         "warnings": warnings,
     })
 
@@ -740,15 +780,16 @@ def cmd_decide(args: argparse.Namespace) -> None:
             u = ids.get(cid)
             if u is None:
                 continue
-            if u["status"] == "planned":
+            if u["status"] in ("planned", "deferred"):
                 if not args.agent or not c.is_agent_id(args.agent):
-                    c.die(f"{fp}: linking a carried record to planned unit {cid} needs --agent (the verifier becomes the owner)")
+                    c.die(f"{fp}: linking a carried record to {u['status']} unit {cid} needs --agent (the verifier becomes the owner)")
                 files = sorted({e["file"] for e in rec["evidence"]})
                 u["status"] = "candidate"
                 u["agent_id"] = args.agent
                 u["reviewed_paths"] = files
                 u["checks"] = [{"agent_id": args.agent, "reviewed_paths": files, "invariant": rec["title"], "method": "source", "result": f"carried record re-checked: {verdict}", "check_log": None}]
                 u["result_fingerprints"] = [fp]
+                u["unresolved"] = []
                 linked.append(u)
             elif u["status"] in EVIDENCE_STATES and fp not in u["result_fingerprints"]:
                 u["result_fingerprints"].append(fp)
@@ -851,8 +892,10 @@ def cmd_validate(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     units = load_ledger(run_dir)
     candidates = c.load_candidates(run_dir)
-    c.fail_if(validate_ledger(run_dir, units, candidates))
-    c.emit({"ok": True, "units": len(units), "counts": counts(units)})
+    errors = validate_ledger(run_dir, units, candidates)
+    errors += cross_check(c.load_findings(run_dir), units, candidates)
+    c.fail_if(errors)
+    c.emit({"ok": True, "units": len(units), "counts": counts(units), "decided": len(candidates["decided"])})
 
 
 def cmd_status(args: argparse.Namespace) -> None:

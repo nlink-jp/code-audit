@@ -56,7 +56,10 @@ def cmd_validate(args: argparse.Namespace) -> None:
         if not isinstance(findings, list):
             c.die(f"{path}: expected a top-level array")
     target = Path(args.target) if args.target else None
-    c.fail_if(validate_findings(run_dir, findings, target))
+    errors = validate_findings(run_dir, findings, target)
+    if run_dir is not None and (run_dir / c.LEDGER_FILE).exists():
+        errors += ledger.cross_check(findings, ledger.load_ledger(run_dir), c.load_candidates(run_dir))
+    c.fail_if(errors)
     c.emit({"ok": True, "records": len(findings), "verdicts": {v: sum(1 for r in findings if r.get("verdict") == v) for v in ledger.VERDICTS}})
 
 
@@ -106,10 +109,31 @@ def cmd_add(args: argparse.Namespace) -> None:
     existing = [i for i, r in enumerate(findings) if r.get("fingerprint") == rec["fingerprint"]]
     if existing and not args.replace:
         c.die(f"{rec['fingerprint']}: already in {c.FINDINGS_FILE}; pass --replace to replace it")
+    if args.replace and not existing:
+        c.die(f"{rec['fingerprint']}: nothing to replace; it is not in {c.FINDINGS_FILE}")
+    if (run_dir / c.LEDGER_FILE).exists():
+        # A record enters only for a claim the ledger holds: a pending
+        # candidate (first add) or a decided one (replacement), citing units
+        # that exist. Otherwise a never-hunted claim would reach the report.
+        units = ledger.load_ledger(run_dir)
+        cands = c.load_candidates(run_dir)
+        ids = {u["coverage_id"] for u in units}
+        fp = rec["fingerprint"]
+        missing = [cid for cid in rec["coverage_ids"] if cid not in ids]
+        if missing:
+            c.die(f"{fp}: coverage ids not in the ledger: {missing}")
+        pending = {r["fingerprint"] for key in ("candidates", "carried") for r in cands[key]}
+        decided = {d["fingerprint"] for d in cands["decided"]}
+        if not existing and fp not in pending:
+            c.die(f"{fp}: not a pending candidate of this run; a record needs a claim the ledger holds")
+        if existing and fp not in decided:
+            c.die(f"{fp}: the record exists but was never decided; run ledger.py decide before replacing it")
     replaced = None
     entry = None
     if existing:
         old = findings[existing[-1]]
+        if set(old.get("coverage_ids", [])) != set(rec["coverage_ids"]):
+            c.die(f"{rec['fingerprint']}: a replacement keeps the record's coverage_ids")
         if not args.by or not c.is_agent_id(args.by):
             c.die("--replace needs --by <agent-id> (the re-verifier that wrote the replacement)")
         strengthened = strengthened_fields(old, rec)

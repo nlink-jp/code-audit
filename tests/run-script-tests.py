@@ -681,6 +681,8 @@ class FindingsTests(RunFixture):
         rec = self.candidate_record(0)
         self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a.json"))))
         self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a2.json"))), "pass --replace")
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a3.json")), "--replace", "--by", "reverifier-1"), "never decided")
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", rec["fingerprint"], "--verdict", "confirmed"))
         self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a3.json")), "--replace"), "needs --by")
         rec["severity"]["overall"] = "medium"
         out = self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "b.json")), "--replace", "--by", "reverifier-1"))
@@ -694,6 +696,7 @@ class FindingsTests(RunFixture):
         rec["severity"]["overall"] = "medium"
         rec["severity"]["likelihood"]["score"] = "medium"
         self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a.json"))))
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", rec["fingerprint"], "--verdict", "confirmed"))
         # wording and line numbers: applied directly
         reworded = json.loads(json.dumps(rec))
         reworded["description"] = "A caller-supplied name with '../' selects a file outside base_dir."
@@ -731,6 +734,46 @@ class FindingsTests(RunFixture):
         out = self.ok(run("findings.py", "note", str(self.run_dir), "--agent", "verifier-1", "--kind", "hardening", "--text", "pin the test runner version"))
         self.assertEqual(out["notes"], 1)
         self.refused(run("findings.py", "note", str(self.run_dir), "--agent", "Verifier", "--kind", "hardening", "--text", "x"), "canonical agent id")
+
+    def test_add_takes_only_claims_the_ledger_holds(self) -> None:
+        self.hunt()
+        ghost = self.candidate_record(0, fingerprint="app/files.py:never_hunted:ghost")
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(ghost, "g.json"))), "not a pending candidate")
+        bad_unit = self.candidate_record(0, coverage_ids=["ghost-unit"])
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(bad_unit, "u.json"))), "not in the ledger")
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(0), "r.json")), "--replace", "--by", "reverifier-1"), "nothing to replace")
+        rec = self.candidate_record(0)
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a.json"))))
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", rec["fingerprint"], "--verdict", "confirmed"))
+        u1, u2 = self.unit_ids()
+        moved = dict(rec, coverage_ids=[u2])
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(moved, "m.json")), "--replace", "--by", "reverifier-1"), "keeps the record's coverage_ids")
+        self.assertEqual(len(json.loads((self.run_dir / "findings.json").read_text(encoding="utf-8"))), 1)
+
+    def test_validators_cross_check_findings_against_the_ledger(self) -> None:
+        self.hunt()
+        rec = self.candidate_record(0)
+        fp = rec["fingerprint"]
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a.json"))))
+        self.refused(run("findings.py", "validate", str(self.run_dir)), "added but not decided")
+        out = self.ok(run("compile.py", str(self.run_dir)))
+        self.assertEqual((out["confirmed"], out["undecided"]), (0, 1))
+        en = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
+        self.assertIn("No confirmed findings.", en)
+        self.assertIn("### Records without a ledger decision (not reported as findings)", en)
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", "confirmed"))
+        self.ok(run("findings.py", "validate", str(self.run_dir)))
+        self.assertEqual(self.ok(run("ledger.py", "validate", str(self.run_dir)))["decided"], 1)
+        weaker = json.loads(json.dumps(self.candidate_record(1)))
+        weaker["fingerprint"], weaker["coverage_ids"] = fp, rec["coverage_ids"]
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(weaker, "nv.json")), "--replace", "--by", "reverifier-1"))
+        self.refused(run("ledger.py", "validate", str(self.run_dir)), "the ledger decided confirmed")
+        self.refused(run("findings.py", "validate", str(self.run_dir)), "the ledger decided confirmed")
+        self.assertEqual(self.ok(run("compile.py", str(self.run_dir)))["undecided"], 1)
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", "needs_validation"))
+        self.ok(run("ledger.py", "validate", str(self.run_dir)))
+        self.ok(run("findings.py", "validate", str(self.run_dir)))
+        self.assertEqual(self.ok(run("compile.py", str(self.run_dir)))["needs_validation"], 1)
 
     def test_redecide_after_a_verdict_changing_replacement(self) -> None:
         self.hunt()
@@ -800,6 +843,35 @@ class PriorRunTests(RunFixture):
         self.assertEqual(units["Injection"]["prior_status"], "prior_covered_changed_source")
         cands = json.loads((run2 / "candidates.json").read_text(encoding="utf-8"))
         self.assertEqual(cands["carried"], [])
+
+    def test_prior_records_without_a_current_unit_are_reported_not_queued(self) -> None:
+        self.complete_run()
+        quick = self.tmpdir / "out" / "quick"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(quick), "--profile", "quick", "--prior", str(self.run_dir)))
+        out = self.ok(run("ledger.py", "seed", str(quick), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.assertEqual(out["carried"], [])
+        self.assertEqual(len(out["unlinked_prior"]), 3)
+        self.assertTrue(any("unlinked_prior" in w for w in out["warnings"]))
+        self.ok(run("compile.py", str(quick)))
+        en = (quick / "REPORT.md").read_text(encoding="utf-8")
+        self.assertIn("### Prior records that no current unit covers (no verdict)", en)
+        self.assertIn("app/files.py:read_user_file:path-traversal", en)
+        self.assertNotIn("| high |", en)
+
+    def test_carried_record_on_a_deferred_unit_is_decidable(self) -> None:
+        self.complete_run()
+        run2 = self.tmpdir / "out" / "run-2"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
+        self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.ok(run("ledger.py", "defer", str(run2), "--all-planned", "--reason", "budget"))
+        rec = self.candidate_record(0)
+        self.ok(run("findings.py", "add", str(run2), str(self.write_json(rec, "carried.json"))))
+        self.refused(run("ledger.py", "decide", str(run2), "--fingerprint", rec["fingerprint"], "--verdict", "confirmed"), "deferred unit")
+        out = self.ok(run("ledger.py", "decide", str(run2), "--fingerprint", rec["fingerprint"], "--verdict", "confirmed", "--agent", "verifier-1"))
+        unit = next(u for u in json.loads((run2 / "coverage-ledger.json").read_text(encoding="utf-8")) if u["coverage_id"] == out["units"][0])
+        self.assertEqual((unit["status"], unit["agent_id"], unit["unresolved"]), ("candidate", "verifier-1", []))
+        self.ok(run("ledger.py", "validate", str(run2)))
+        self.ok(run("findings.py", "validate", str(run2)))
 
     def test_prior_run_contents_are_validated_before_use(self) -> None:
         self.complete_run()
