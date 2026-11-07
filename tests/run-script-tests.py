@@ -386,6 +386,66 @@ class RunPyTests(RunFixture):
         (self.run_dir / "commands.json").write_text(json.dumps(data), encoding="utf-8")
         self.refused(run("run.py", "validate", str(self.run_dir)), "needs a reason")
 
+    def test_init_refuses_output_inside_target_under_another_spelling(self) -> None:
+        upper = self.target.parent / self.target.name.upper()
+        if not upper.exists():
+            self.skipTest("case-sensitive filesystem: one place has one spelling")
+        self.refused(run("run.py", "init", "--target", str(self.target), "--output", str(upper / "audit-out")), "inside the target")
+        self.assertFalse((self.target / "audit-out").exists())
+        nfc = self.tmpdir / "caf\u00e9"
+        shutil.copytree(SAMPLE_REPO, nfc)
+        nfd = self.tmpdir / "cafe\u0301"
+        if nfd.exists():
+            self.refused(run("run.py", "init", "--target", str(nfc), "--output", str(nfd / "out")), "inside the target")
+        link = self.tmpdir / "link-to-target"
+        os.symlink(self.target, link)
+        self.refused(run("run.py", "init", "--target", str(self.target), "--output", str(link / "out")), "inside the target")
+
+    @unittest.skipUnless(shutil.which("git"), "git not available")
+    def test_init_ignores_a_git_dir_that_belongs_to_another_repository(self) -> None:
+        victim = self.tmpdir / "victim"
+        shutil.copytree(SAMPLE_REPO, victim)
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        for cmd in (["git", "init", "-q"], ["git", "add", "."], ["git", "commit", "-q", "-m", "fixture"], ["git", "remote", "add", "origin", "https://github.com/victim-org/private.git"]):
+            subprocess.run(cmd, cwd=str(victim), check=True, capture_output=True, env=env)
+        (self.target / ".git").write_text(f"gitdir: {victim / '.git'}\n", encoding="utf-8")
+        out = self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(self.tmpdir / "o1")))
+        self.assertEqual((out["repo"], out["source_ref"]), ("target", "unversioned"))
+        (self.target / ".git").unlink()
+        os.symlink(victim / ".git", self.target / ".git")
+        out = self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(self.tmpdir / "o2")))
+        self.assertEqual((out["repo"], out["source_ref"]), ("target", "unversioned"))
+        # a linked worktree of the target's own repository is accepted
+        wt = self.tmpdir / "wt"
+        subprocess.run(["git", "worktree", "add", "-q", str(wt)], cwd=str(victim), check=True, capture_output=True, env=env)
+        out = self.ok(run("run.py", "init", "--target", str(wt), "--output", str(self.tmpdir / "o3")))
+        self.assertEqual(out["repo"], "victim-org/private")
+        self.assertRegex(out["source_ref"], r"^[0-9a-f]{40}$")
+
+    def test_digests_follow_no_link_and_stay_bounded(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        import _contract as contract  # noqa: E402
+        outside = self.tmpdir / "outside"
+        outside.mkdir()
+        (outside / "secret").write_text("s3cret\n", encoding="utf-8")
+        os.symlink(outside / "secret", self.target / "app" / "link.txt")
+        os.symlink(outside, self.target / "app" / "linkdir")
+        before = contract.digests_for(self.target, ["app", "app/link.txt", "app/linkdir", "/etc/hosts", "nope"])
+        self.assertEqual((before["app/link.txt"], before["app/linkdir"], before["/etc/hosts"], before["nope"]), ("symlink", "symlink", "invalid", "missing"))
+        self.assertNotIn("s3cret", json.dumps(before))
+        cache = self.target / "app" / "__pycache__"
+        cache.mkdir()
+        (cache / "files.cpython-313.pyc").write_bytes(b"\x00cache")
+        (self.target / "app" / "stray.pyc").write_bytes(b"\x00")
+        self.assertEqual(contract.digests_for(self.target, ["app"])["app"], before["app"])
+        limits = dict(contract.DIGEST_LIMITS)
+        try:
+            contract.DIGEST_LIMITS["files"] = 1
+            self.assertEqual(contract.digests_for(self.target, ["app"])["app"], "too-large")
+        finally:
+            contract.DIGEST_LIMITS.clear()
+            contract.DIGEST_LIMITS.update(limits)
+
 
 class LedgerTests(RunFixture):
     def test_seed_derives_ids_and_digests(self) -> None:
@@ -740,6 +800,23 @@ class PriorRunTests(RunFixture):
         self.assertEqual(units["Injection"]["prior_status"], "prior_covered_changed_source")
         cands = json.loads((run2 / "candidates.json").read_text(encoding="utf-8"))
         self.assertEqual(cands["carried"], [])
+
+    def test_prior_run_contents_are_validated_before_use(self) -> None:
+        self.complete_run()
+        findings = json.loads((self.run_dir / "findings.json").read_text(encoding="utf-8"))
+        hostile = next(r for r in findings if r["verdict"] == "confirmed")
+        hostile["source_digests"] = {"/etc/hosts": "0" * 64}
+        broken = {"verdict": "confirmed", "title": "no fingerprint"}
+        (self.run_dir / "findings.json").write_text(json.dumps([broken, hostile] + [r for r in findings if r["verdict"] != "confirmed"]), encoding="utf-8")
+        ledger = json.loads((self.run_dir / "coverage-ledger.json").read_text(encoding="utf-8"))
+        ledger[0]["source_digests"] = {"../outside.py": "0" * 64}
+        (self.run_dir / "coverage-ledger.json").write_text(json.dumps(ledger), encoding="utf-8")
+        run2 = self.tmpdir / "out" / "run-2"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
+        out = self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.assertEqual(out["carried"], ["app/files.py:read_user_file:symlink-escape"])
+        self.assertEqual(sum("dropped" in w for w in out["warnings"]), 3)
+        self.assertNotIn("/etc/hosts", (run2 / "candidates.json").read_text(encoding="utf-8"))
 
 
 class CompileTests(RunFixture):

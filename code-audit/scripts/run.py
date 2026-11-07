@@ -101,10 +101,34 @@ def parse_git_config(text: str) -> dict[str, str]:
     return out
 
 
+def points_back_at(gitdir: Path, target: Path) -> bool:
+    """Whether a git-dir outside the target is the target's own: a linked
+    worktree's `<common>/worktrees/<name>` (its `gitdir` file names the
+    target's `.git`) or a submodule's `<super>/.git/modules/<name>` (its
+    config's core.worktree resolves to the target). Anything else is another
+    repository the target merely points at."""
+    wt = gitdir / "gitdir"
+    if wt.is_file():
+        named = Path(wt.read_text(encoding="utf-8", errors="replace").strip())
+        if named.name == ".git" and c.same_place(named.parent, target):
+            return True
+    cfg = gitdir / "config"
+    if cfg.is_file():
+        worktree = parse_git_config(cfg.read_text(encoding="utf-8", errors="replace")).get("core.worktree")
+        if worktree and c.same_place(gitdir / worktree, target):
+            return True
+    return False
+
+
 def resolve_git_dir(target: Path) -> tuple[Path, Path] | None:
     """(git-dir, common-dir) of the target, following a `gitdir:` file
-    (linked worktree or submodule) and a `commondir` file one level."""
+    (linked worktree or submodule) and a `commondir` file one level. A
+    `.git` that is a link, or a git-dir outside the target that does not
+    point back at it, makes the target `unversioned`: the target must not be
+    able to lend another repository's name and history to the run."""
     dot = target / ".git"
+    if dot.is_symlink():
+        return None
     if dot.is_dir():
         gitdir = dot
     elif dot.is_file():
@@ -114,12 +138,16 @@ def resolve_git_dir(target: Path) -> tuple[Path, Path] | None:
         gitdir = (target / line[len("gitdir:"):].strip()).resolve()
         if not gitdir.is_dir():
             return None
+        if not c.is_inside(gitdir, target) and not points_back_at(gitdir, target):
+            return None
     else:
         return None
     common = gitdir
     cd = gitdir / "commondir"
     if cd.is_file():
         common = (gitdir / cd.read_text(encoding="utf-8", errors="replace").strip()).resolve()
+        if not c.is_inside(common, target) and not c.is_inside(gitdir, common):
+            return None
     return gitdir, common
 
 

@@ -274,14 +274,33 @@ def validate_ledger(run_dir: Path, units: list, candidates: dict) -> list[str]:
 
 
 def load_prior(path: Path) -> dict:
+    """A prior run directory is input, not a trusted record: its metadata must
+    validate, and every unit and record is held to the same bar as this run's;
+    the ones that fail are dropped and named in `warnings`."""
     meta = c.read_json(path / c.METADATA_FILE)
     errs = c.validate_part(meta, "metadata", f"prior {path.name} metadata")
     c.fail_if(errs)
+    warnings: list[str] = []
     ledger_path = path / c.LEDGER_FILE
-    ledger = c.read_json(ledger_path) if ledger_path.exists() else None
+    ledger = None
+    if ledger_path.exists():
+        raw = c.read_json(ledger_path)
+        ledger = []
+        for i, pu in enumerate(raw if isinstance(raw, list) else []):
+            if c.validate_part(pu, "unit", f"prior.ledger[{i}]") or not isinstance(pu.get("source_digests"), dict) or any(not c.is_repo_relative(k) for k in pu["source_digests"]):
+                warnings.append(f"prior {path.name}: ledger unit {i} dropped (does not validate)")
+                continue
+            ledger.append(pu)
     findings_path = path / c.FINDINGS_FILE
-    findings = c.read_json(findings_path) if findings_path.exists() else []
-    return {"run_id": meta["run_id"], "name": path.resolve().name, "ledger": ledger, "findings": findings, "profile": meta["profile"]}
+    findings = []
+    if findings_path.exists():
+        raw = c.read_json(findings_path)
+        for i, rec in enumerate(raw if isinstance(raw, list) else []):
+            if not isinstance(rec, dict) or record_errors(None, rec, f"prior.findings[{i}]"):
+                warnings.append(f"prior {path.name}: record {i} dropped (does not validate)")
+                continue
+            findings.append(rec)
+    return {"run_id": meta["run_id"], "name": path.resolve().name, "ledger": ledger, "findings": findings, "profile": meta["profile"], "warnings": warnings}
 
 
 def prior_status_from_unit(pu: dict, current_digests: dict) -> str:
@@ -331,7 +350,7 @@ def cmd_seed(args: argparse.Namespace) -> None:
 
     priors = [load_prior(Path(p)) for p in (args.prior or [])]
     candidates = c.load_candidates(run_dir)
-    warnings: list[str] = []
+    warnings: list[str] = [w for p in priors for w in p["warnings"]]
     ids = by_id(units)
     if priors:
         for u in units:

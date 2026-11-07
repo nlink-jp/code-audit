@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import sys
 import unicodedata
 from pathlib import Path
@@ -197,14 +198,42 @@ def is_fingerprint(value: object) -> bool:
     return isinstance(value, str) and bool(FINGERPRINT_RE.match(value))
 
 
+def _identity(path: Path) -> tuple[int, int] | None:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
 def same_place(a: Path, b: Path) -> bool:
-    """Compare two places by identity (resolved path), never by name."""
-    return a.resolve() == b.resolve()
+    """Compare two places by identity (device and inode), never by name: a
+    case-insensitive or normalising disk gives one place many spellings."""
+    ia, ib = _identity(a), _identity(b)
+    return ia is not None and ia == ib
 
 
 def is_inside(child: Path, parent: Path) -> bool:
-    c, p = child.resolve(), parent.resolve()
-    return c == p or p in c.parents
+    """Whether `child` is `parent` or lies beneath it, judged by identity.
+
+    `child` need not exist yet: its nearest existing ancestor is taken, links
+    are resolved there, and every ancestor is compared with `parent` by
+    device and inode. A parent that does not exist contains nothing."""
+    pid = _identity(parent)
+    if pid is None:
+        return False
+    cur = Path(os.path.abspath(child))
+    while not cur.exists():
+        if cur.parent == cur:
+            return False
+        cur = cur.parent
+    cur = Path(os.path.realpath(cur))
+    while True:
+        if _identity(cur) == pid:
+            return True
+        if cur.parent == cur:
+            return False
+        cur = cur.parent
 
 
 # ---------------------------------------------------------------------------
@@ -254,21 +283,66 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+# Bounds for digesting a cited directory: the target is adversarial input and
+# may plant a link to the whole disk or a huge tree under a cited path.
+DIGEST_LIMITS = {"files": 50_000, "bytes": 256 * 1024 * 1024}
+DIGEST_SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv"}
+DIGEST_SKIP_SUFFIXES = (".pyc", ".pyo")
+
+
+def _regular_files(root: Path) -> Iterable[Path]:
+    """Regular files under root, never through a link, skipping caches and
+    VCS internals; yields in sorted order so the digest is stable."""
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = sorted(d for d in dirnames if d not in DIGEST_SKIP_DIRS and not (Path(dirpath) / d).is_symlink())
+        for name in sorted(filenames):
+            p = Path(dirpath) / name
+            if name.endswith(DIGEST_SKIP_SUFFIXES):
+                continue
+            try:
+                st = os.lstat(p)
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            yield p
+
+
 def digests_for(target: Path, paths: Iterable[str]) -> dict[str, str]:
-    """sha256 per repository-relative path; 'missing' when the path is not a
-    regular file. Directories are digested as the sorted list of their
-    regular files' digests so a unit may cite a package path."""
+    """sha256 per repository-relative path. Values other than a digest:
+    'missing' (no such regular file or directory), 'symlink' (the cited path
+    is a link; links are never followed), 'invalid' (not repository-relative),
+    'too-large' (a directory past DIGEST_LIMITS). Directories are digested as
+    the sorted list of their regular files' digests so a unit may cite a
+    package path; caches and VCS internals are skipped."""
     out: dict[str, str] = {}
     for rel in sorted(set(paths)):
+        if not is_repo_relative(rel):
+            out[rel] = "invalid"
+            continue
         p = target / rel
-        if p.is_file():
+        try:
+            st = os.lstat(p)
+        except OSError:
+            out[rel] = "missing"
+            continue
+        if stat.S_ISLNK(st.st_mode):
+            out[rel] = "symlink"
+        elif stat.S_ISREG(st.st_mode):
             out[rel] = sha256_file(p)
-        elif p.is_dir():
+        elif stat.S_ISDIR(st.st_mode):
             h = hashlib.sha256()
-            for f in sorted(x for x in p.rglob("*") if x.is_file() and ".git" not in x.parts):
+            files = total = 0
+            for f in _regular_files(p):
+                files += 1
+                total += f.stat().st_size
+                if files > DIGEST_LIMITS["files"] or total > DIGEST_LIMITS["bytes"]:
+                    out[rel] = "too-large"
+                    break
                 h.update(str(f.relative_to(target)).encode("utf-8"))
                 h.update(sha256_file(f).encode("ascii"))
-            out[rel] = h.hexdigest()
+            else:
+                out[rel] = h.hexdigest()
         else:
             out[rel] = "missing"
     return out
