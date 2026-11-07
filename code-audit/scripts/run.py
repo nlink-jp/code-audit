@@ -24,9 +24,11 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,10 +44,14 @@ ROLES = ("reconnaissance", "hunter", "critic", "verifier", "reverifier")
 # ---------------------------------------------------------------------------
 
 
+# The target is untrusted input. Its .git/config may name commands (a
+# fsmonitor, a clean filter that `git status` runs on a touched file, hooks,
+# an ssh command), and -c overrides cannot undefine a filter the repository
+# defines. So git never sees the target's config: `init` copies HEAD, the
+# index, refs and exclude data into a scratch git-dir with a minimal config
+# of its own, links the object store, and runs git against that.
+
 GIT_HARDENING = [
-    # The target is untrusted input: its .git/config may name a fsmonitor,
-    # hooks path or other command. Command-line -c overrides win over every
-    # config file, and the environment disables the system and global ones.
     "-c", "core.fsmonitor=false",
     "-c", "core.untrackedCache=false",
     "-c", "core.hooksPath=/dev/null",
@@ -57,15 +63,103 @@ GIT_ENV = {
     "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
     "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_ATTR_NOSYSTEM": "1",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_OPTIONAL_LOCKS": "0",
     "LC_ALL": "C",
 }
+# Repository config keys copied into the scratch config: data that changes
+# how the index is compared, never a command. Values are checked against the
+# pattern before they are written.
+CONFIG_COPY = {
+    "core.filemode": r"^(true|false)$",
+    "core.ignorecase": r"^(true|false)$",
+    "core.precomposeunicode": r"^(true|false)$",
+    "core.symlinks": r"^(true|false)$",
+    "core.autocrlf": r"^(true|false|input)$",
+    "extensions.objectformat": r"^(sha1|sha256)$",
+    "extensions.refstorage": r"^(files|reftable)$",
+}
 
 
-def git(target: Path, *args: str) -> str | None:
+def parse_git_config(text: str) -> dict[str, str]:
+    """Flat `section[.subsection].key -> value` map of a git config file.
+    Read as text only; nothing in it is ever passed to git."""
+    out: dict[str, str] = {}
+    section: str | None = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        m = re.match(r'^\[([^\s"\]]+)(?:\s+"((?:[^"\\]|\\.)*)")?\]$', line)
+        if m:
+            section = m.group(1).lower() + (f".{m.group(2)}" if m.group(2) else "")
+            continue
+        if section and "=" in line:
+            key, value = line.split("=", 1)
+            out[f"{section}.{key.strip().lower()}"] = value.strip()
+    return out
+
+
+def resolve_git_dir(target: Path) -> tuple[Path, Path] | None:
+    """(git-dir, common-dir) of the target, following a `gitdir:` file
+    (linked worktree or submodule) and a `commondir` file one level."""
+    dot = target / ".git"
+    if dot.is_dir():
+        gitdir = dot
+    elif dot.is_file():
+        line = dot.read_text(encoding="utf-8", errors="replace").strip()
+        if not line.startswith("gitdir:"):
+            return None
+        gitdir = (target / line[len("gitdir:"):].strip()).resolve()
+        if not gitdir.is_dir():
+            return None
+    else:
+        return None
+    common = gitdir
+    cd = gitdir / "commondir"
+    if cd.is_file():
+        common = (gitdir / cd.read_text(encoding="utf-8", errors="replace").strip()).resolve()
+    return gitdir, common
+
+
+def sanitized_git_dir(gitdir: Path, common: Path, scratch: Path) -> dict[str, str] | None:
+    """Build a git-dir under scratch that holds the target's HEAD, index,
+    refs, packed-refs, shallow list and ignore data, links its object store,
+    and carries a config of our own. Returns the parsed original config."""
+    head = gitdir / "HEAD"
+    if not head.is_file():
+        return None
+    shutil.copy(head, scratch / "HEAD")
+    if (gitdir / "index").is_file():
+        shutil.copy(gitdir / "index", scratch / "index")
+    for name in ("packed-refs", "shallow"):
+        if (common / name).is_file():
+            shutil.copy(common / name, scratch / name)
+    for name in ("refs", "reftable"):
+        if (common / name).is_dir():
+            shutil.copytree(common / name, scratch / name, symlinks=False)
+    (scratch / "refs").mkdir(exist_ok=True)
+    if (common / "info" / "exclude").is_file():
+        (scratch / "info").mkdir()
+        shutil.copy(common / "info" / "exclude", scratch / "info" / "exclude")
+    os.symlink(common / "objects", scratch / "objects")
+    config_path = common / "config"
+    original = parse_git_config(config_path.read_text(encoding="utf-8", errors="replace")) if config_path.is_file() else {}
+    copied = {k: v for k, v in original.items() if k in CONFIG_COPY and re.match(CONFIG_COPY[k], v)}
+    version = "1" if any(k.startswith("extensions.") for k in copied) else "0"
+    lines = ["[core]", f"\trepositoryformatversion = {version}", "\tbare = false"]
+    lines += [f"\t{k.split('.', 1)[1]} = {v}" for k, v in copied.items() if k.startswith("core.")]
+    if version == "1":
+        lines.append("[extensions]")
+        lines += [f"\t{k.split('.', 1)[1]} = {v}" for k, v in copied.items() if k.startswith("extensions.")]
+    (scratch / "config").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return original
+
+
+def git(scratch: Path, worktree: Path, *args: str) -> str | None:
     try:
-        out = subprocess.run(["git", *GIT_HARDENING, "-C", str(target), *args], capture_output=True, text=True, timeout=30, env=GIT_ENV)
+        out = subprocess.run(["git", *GIT_HARDENING, "--git-dir", str(scratch), "--work-tree", str(worktree), *args], capture_output=True, text=True, timeout=60, env=GIT_ENV)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if out.returncode != 0:
@@ -73,13 +167,33 @@ def git(target: Path, *args: str) -> str | None:
     return out.stdout.strip()
 
 
-def repo_name(target: Path) -> str:
-    url = git(target, "remote", "get-url", "origin")
-    if url:
-        m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$", url)
-        if m:
-            return f"{m.group(1)}/{m.group(2)}"
+def repo_name_from(config: dict[str, str], target: Path) -> str:
+    url = config.get("remote.origin.url", "")
+    m = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$", url)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
     return target.resolve().name
+
+
+def inspect_target(target: Path) -> dict:
+    """repo name, source ref and dirty flag without letting the target's
+    git config reach git. A target without a usable .git is 'unversioned'."""
+    resolved = resolve_git_dir(target)
+    if resolved is None:
+        return {"repo": target.resolve().name, "source_ref": "unversioned", "dirty": True}
+    gitdir, common = resolved
+    with tempfile.TemporaryDirectory(prefix="code-audit-git-") as tmp:
+        scratch = Path(tmp) / "gitdir"
+        scratch.mkdir()
+        original = sanitized_git_dir(gitdir, common, scratch)
+        if original is None:
+            return {"repo": target.resolve().name, "source_ref": "unversioned", "dirty": True}
+        name = repo_name_from(original, target)
+        source_ref = git(scratch, target, "rev-parse", "HEAD")
+        porcelain = git(scratch, target, "status", "--porcelain", "--no-renames", "--ignore-submodules=all")
+    if source_ref is None or porcelain is None:
+        return {"repo": name, "source_ref": "unversioned", "dirty": True}
+    return {"repo": name, "source_ref": source_ref, "dirty": bool(porcelain)}
 
 
 def next_run_dir(base: Path) -> Path:
@@ -93,7 +207,8 @@ def cmd_init(args: argparse.Namespace) -> None:
     target = Path(args.target)
     if not target.is_dir():
         c.die(f"target is not a directory: {args.target}")
-    name = repo_name(target)
+    info = inspect_target(target)
+    name = info["repo"]
     run_dir = Path(args.output) if args.output else next_run_dir(Path.home() / "code-audit-runs" / name.replace("/", "__"))
     if c.is_inside(run_dir, target):
         c.die("output directory is inside the target; choose a directory outside the repository under audit")
@@ -107,12 +222,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         if not (pp / c.METADATA_FILE).is_file():
             c.die(f"prior run has no {c.METADATA_FILE}: {p}")
         priors.append(pp.resolve().name)
-    source_ref = git(target, "rev-parse", "HEAD")
-    porcelain = git(target, "status", "--porcelain")
-    if source_ref is None:
-        source_ref, dirty = "unversioned", True
-    else:
-        dirty = bool(porcelain)
+    source_ref, dirty = info["source_ref"], info["dirty"]
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / c.CHECKS_DIR).mkdir(exist_ok=True)
     metadata = {

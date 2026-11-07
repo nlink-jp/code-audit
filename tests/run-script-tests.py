@@ -274,6 +274,31 @@ class RunPyTests(RunFixture):
         self.assertRegex(out["source_ref"], r"^[0-9a-f]{40}$")
         self.assertFalse(marker.exists(), "the target's core.fsmonitor command ran during init")
 
+    @unittest.skipUnless(shutil.which("git"), "git not available")
+    def test_init_does_not_run_a_clean_filter_defined_in_the_target_config(self) -> None:
+        # `git status` re-hashes a tracked file whose stat changed but whose
+        # size did not, and that hashing runs the clean filter the repository
+        # config defines for it. The sanitized git-dir carries no filter.
+        target = self.tmpdir / "hostile"
+        shutil.copytree(SAMPLE_REPO, target)
+        marker = self.tmpdir / "clean-ran"
+        hook = self.tmpdir / "clean.sh"
+        hook.write_text(f"#!/bin/sh\ntouch '{marker}'\ncat\n", encoding="utf-8")
+        hook.chmod(0o755)
+        (target / ".gitattributes").write_text("*.py filter=evil\n", encoding="utf-8")
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        for cmd in (["git", "init", "-q"], ["git", "add", "."], ["git", "commit", "-q", "-m", "fixture"], ["git", "config", "filter.evil.clean", str(hook)], ["git", "remote", "add", "origin", "git@github.com:example/hostile.git"]):
+            subprocess.run(cmd, cwd=str(target), check=True, capture_output=True, env=env)
+        os.utime(target / "app" / "files.py", (0, 0))  # same size, different stat: forces re-hashing
+        out = self.ok(run("run.py", "init", "--target", str(target), "--output", str(self.tmpdir / "out-hostile")))
+        self.assertFalse(marker.exists(), "the target's clean filter ran during init")
+        self.assertEqual(out["repo"], "example/hostile")
+        self.assertFalse(out["dirty"], "content is unchanged, so the worktree is clean")
+        (target / "app" / "files.py").write_text("# changed\n", encoding="utf-8")
+        out = self.ok(run("run.py", "init", "--target", str(target), "--output", str(self.tmpdir / "out-hostile-2")))
+        self.assertTrue(out["dirty"])
+        self.assertFalse(marker.exists())
+
     def test_validate_rejects_forbidden_command_without_reason(self) -> None:
         data = json.loads((FIXTURES / "commands.json").read_text(encoding="utf-8"))
         data["commands"][1]["reason"] = ""

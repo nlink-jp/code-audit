@@ -27,13 +27,16 @@
   status), `scripts/findings.py` (validate, add one record at a time with
   stale-digest refusal, note), `scripts/compile.py` (ja/en reports derived
   from records, code only inside fences), `scripts/classes.py` (list, size,
-  check-knowledge). 40 tests over a fixture repository with a deliberate
+  check-knowledge). Tests run over a fixture repository with a deliberate
   path traversal.
-- Hardening from the commit-time security review: `run.py` calls git on the
-  untrusted target with command-line config overrides (`core.fsmonitor`,
-  `core.hooksPath`, `core.sshCommand`, `protocol.allow`) and a minimal
-  environment that disables system and global config; `run.py exec` runs the
-  command in its own session and kills the whole process group on timeout.
+- Hardening from the commit-time security review: `run.py init` never lets
+  the target's `.git/config` reach git — it builds a scratch git-dir (HEAD,
+  index, refs, exclude data copied; objects linked; a config of its own with
+  data keys only) and runs git against that with `-c` overrides and a
+  minimal environment, because a repository-defined clean filter runs under
+  `git status` and cannot be undefined from the command line; `run.py exec`
+  runs the command in its own session and kills the whole process group on
+  timeout. 41 tests.
 
 ### Planned for 0.1.0
 

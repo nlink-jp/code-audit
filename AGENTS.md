@@ -135,11 +135,18 @@ code-audit/
   macOS Python adds `LC_CTYPE` / `__CF_USER_TEXT_ENCODING` inside the child
   on its own; the test checks that a sentinel variable does not leak rather
   than an exact set.
-- **git is called on an untrusted repository.** `run.py init` runs git with
-  `-c core.fsmonitor=false -c core.hooksPath=/dev/null ...` and an
-  environment that disables the system and global config, because the
-  target's `.git/config` may name a command. A test plants a `core.fsmonitor`
-  script and asserts it never runs.
+- **git never sees the target's config.** The target's `.git/config` may
+  name commands, and `-c` overrides cannot undefine a clean filter the
+  repository defines (`git status` runs it when a tracked file's stat
+  changed but its size did not). `run.py init` therefore builds a scratch
+  git-dir — HEAD, index, refs, packed-refs, shallow, info/exclude copied,
+  objects linked, a config of its own with only data keys copied (filemode,
+  ignorecase, autocrlf, objectformat, refstorage) — and runs
+  `git --git-dir <scratch> --work-tree <target>` with the `-c` overrides and
+  a minimal environment. The remote URL is parsed from the config as text.
+  Two tests plant a `core.fsmonitor` script and a `filter.*.clean` script and
+  assert neither runs; the clean-filter vector was confirmed live before the
+  fix.
 - **`run.py exec` kills the whole process group** on timeout
   (`start_new_session=True` + `os.killpg`); killing only the child would
   leave a grandchild holding the pipes and the parent waiting. A test spawns
