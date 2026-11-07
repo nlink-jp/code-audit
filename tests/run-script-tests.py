@@ -329,6 +329,22 @@ class RunPyTests(RunFixture):
             run_module.COPY_LIMITS.update(limits)
         self.assertEqual(info["source_ref"], "unversioned")
         self.assertTrue(info["dirty"])
+        # directories count and nesting is bounded: a refs tree 40 levels deep (or 1,000 empty dirs) is refused
+        big.write_bytes(b"# ok\n")
+        deep = target / ".git" / "refs" / "heads"
+        for i in range(40):
+            deep = deep / f"d{i}"
+        deep.mkdir(parents=True)
+        self.assertEqual(run_module.inspect_target(target)["source_ref"], "unversioned")
+        shutil.rmtree(target / ".git" / "refs" / "heads" / "d0")
+        for i in range(1000):
+            (target / ".git" / "refs" / "heads" / f"e{i}").mkdir()
+        try:
+            run_module.COPY_LIMITS["files"] = 500
+            self.assertEqual(run_module.inspect_target(target)["source_ref"], "unversioned")
+        finally:
+            run_module.COPY_LIMITS.clear()
+            run_module.COPY_LIMITS.update(limits)
 
     def test_validate_rejects_forbidden_command_without_reason(self) -> None:
         data = json.loads((FIXTURES / "commands.json").read_text(encoding="utf-8"))

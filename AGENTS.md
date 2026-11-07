@@ -147,9 +147,10 @@ code-audit/
   Two tests plant a `core.fsmonitor` script and a `filter.*.clean` script and
   assert neither runs; the clean-filter vector was confirmed live before the
   fix. The copy itself follows no link (`O_NOFOLLOW`, `scandir` without
-  following), takes regular files only, and stops at `COPY_LIMITS` (bytes,
-  files, per-file bytes); a target past the budget is recorded as
-  `unversioned`, never crashed on.
+  following), takes regular files only, charges every entry including
+  directories, and stops at `COPY_LIMITS` (bytes, files, per-file bytes,
+  nesting depth); a target past the budget is recorded as `unversioned`,
+  never crashed on.
 - **`run.py exec` kills the whole process group** on timeout
   (`start_new_session=True` + `os.killpg`); killing only the child would
   leave a grandchild holding the pipes and the parent waiting. A test spawns

@@ -126,7 +126,7 @@ def resolve_git_dir(target: Path) -> tuple[Path, Path] | None:
 # Bounds for the copy into the scratch git-dir: the target may plant a
 # symlink to a device or a huge file under .git, so only regular files are
 # copied, never through a link, and never past these totals.
-COPY_LIMITS = {"bytes": 512 * 1024 * 1024, "files": 200_000, "file_bytes": 512 * 1024 * 1024}
+COPY_LIMITS = {"bytes": 512 * 1024 * 1024, "files": 200_000, "file_bytes": 512 * 1024 * 1024, "depth": 32}
 
 
 class CopyBudgetExceeded(OSError):
@@ -161,15 +161,22 @@ def copy_regular_file(src: Path, dst: Path, budget: dict[str, int]) -> bool:
         os.close(fd)
 
 
-def copy_regular_tree(src: Path, dst: Path, budget: dict[str, int]) -> None:
-    """Copy the regular files under src, skipping symlinks and special files."""
+def copy_regular_tree(src: Path, dst: Path, budget: dict[str, int], depth: int = 0) -> None:
+    """Copy the regular files under src, skipping symlinks and special files.
+    Every entry, directories included, is charged to the file budget, and
+    nesting past COPY_LIMITS['depth'] exceeds the budget."""
+    if depth > COPY_LIMITS["depth"]:
+        raise CopyBudgetExceeded(f"{src}: nesting exceeds the git-dir copy budget")
     dst.mkdir()
     with os.scandir(src) as it:
         for entry in it:
+            if budget["files"] < 1:
+                raise CopyBudgetExceeded(f"{entry.path}: exceeds the git-dir copy budget")
             if entry.is_symlink():
                 continue
             if entry.is_dir(follow_symlinks=False):
-                copy_regular_tree(Path(entry.path), dst / entry.name, budget)
+                budget["files"] -= 1
+                copy_regular_tree(Path(entry.path), dst / entry.name, budget, depth + 1)
             elif entry.is_file(follow_symlinks=False):
                 copy_regular_file(Path(entry.path), dst / entry.name, budget)
 
@@ -198,7 +205,7 @@ def sanitized_git_dir(gitdir: Path, common: Path, scratch: Path) -> dict[str, st
         original: dict[str, str] = {}
         if config_path.is_file() and not config_path.is_symlink() and config_path.stat().st_size <= 1 << 20:
             original = parse_git_config(config_path.read_text(encoding="utf-8", errors="replace"))
-    except OSError:
+    except (OSError, RecursionError):
         return None
     copied = {k: v for k, v in original.items() if k in CONFIG_COPY and re.match(CONFIG_COPY[k], v)}
     version = "1" if any(k.startswith("extensions.") for k in copied) else "0"
