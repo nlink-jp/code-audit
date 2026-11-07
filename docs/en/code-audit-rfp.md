@@ -422,3 +422,18 @@ independent pass), it sits beside compliance-review and incident-review.
   scratch/artifacts separation and eleven-step promotion procedure became
   unnecessary, and `local_checks.artifact` became a reference to the
   parent-written `checks/<id>.log`.
+- **2026-11-08 adjustments while implementing cut (2)**: (a) a discarded
+  hunter result had no exit (`defer` takes planned units only; `merge-critic`
+  reassigns blocked / covered / candidate only) → `ledger.py abandon` archives
+  the attempt as `in_progress` and returns the units to planned. (b) candidates
+  nobody decided vanished from the report → `compile.py` lists them as
+  "Candidates not verified" with no verdict and no severity, and the parent
+  marks the run `incomplete`. (c) a class's `Source:` is comma-separated but
+  most knowledge headings contain commas → split only at the comma before the
+  next reference (`ADR-NNN` / `doc.md#`). (d) the parent runs every allowed
+  command once during reconnaissance; hunters and verifiers cite the
+  `checks/` logs (keeps §3's "hunters do not execute" as written). (e) the
+  verifier's return carries `layers_examined` beside the record, so the
+  reconstruction of preventing layers is visible. 52 classes (generic 9,
+  MCP 11, CLI 14, agent runtime 18), 106 sources checked against the
+  knowledge and ADR checkouts.

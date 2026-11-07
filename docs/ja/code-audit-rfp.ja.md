@@ -374,3 +374,16 @@ compliance-review / incident-review と並ぶ。
 - **設計上の簡約**: サブエージェントが読み取り専用である決定により、参考元の
   scratch/artifacts 分離・11 段の昇格手順が不要になり、`local_checks.artifact`
   は親が書く `checks/<id>.log` への参照に置き換わった。
+- **2026-11-08 区切り (2) の実装時の調整**: (a) 失敗した
+  ハンター結果の出口が無かった（`defer` は planned のみ、`merge-critic` の
+  再割当は blocked / covered / candidate のみ）→ `ledger.py abandon` を追加し、
+  試行を `in_progress` のまま archive して単位を planned に戻す。(b) 判定に
+  至らなかった候補が報告書から消えていた → `compile.py` が「検証に至らなかった
+  候補」として判定・深刻度なしで列挙し、親は run を `incomplete` にする。
+  (c) クラスの `Source:` はカンマ区切りだが knowledge の見出しの多くはカンマを
+  含む → 次の参照（`ADR-NNN` / `doc.md#`）の直前のカンマだけで分ける。
+  (d) 偵察で許可コマンドを親が 1 度だけ実行し、ハンターと検証者はその
+  `checks/` のログを引用する（§3 の「ハンターは実行しない」をそのまま保つ
+  ための配置）。(e) 検証者の出力は record の外に `layers_examined` を持ち、
+  防ぐ層の再構成を見える形で返す。クラス数は汎用 9・MCP 11・CLI 14・
+  エージェントランタイム 18 の 52、出典 106 件を knowledge と ADR の実物で検査。
