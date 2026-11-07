@@ -60,6 +60,39 @@ def cmd_validate(args: argparse.Namespace) -> None:
     c.emit({"ok": True, "records": len(findings), "verdicts": {v: sum(1 for r in findings if r.get("verdict") == v) for v in ledger.VERDICTS}})
 
 
+VERDICT_RANK = {"rejected": 0, "needs_validation": 1, "confirmed": 2}
+LEVEL_RANK = {"informational": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+EVIDENCE_RANK = {"source": 0, "existing_test": 1}
+
+
+def strengthened_fields(old: dict, new: dict) -> list[str]:
+    """The fields along which `new` claims more than `old` did.
+
+    The replacement rule (RFP §3): a re-verifier's replacement that keeps or
+    weakens the verdict, severity or confidence — or only corrects wording and
+    line numbers — is applied directly; one that strengthens any of them is
+    confirmed by another fresh verifier first. Prose fields (root cause,
+    description) cannot be ranked here; the workflow treats a widened root
+    cause as strengthening and passes --confirmed-by for it."""
+    out: list[str] = []
+    if VERDICT_RANK[new["verdict"]] > VERDICT_RANK[old["verdict"]]:
+        out.append("verdict")
+    if old["verdict"] == "confirmed" and new["verdict"] == "confirmed":
+        for path, rank in (
+            (("severity", "overall"), LEVEL_RANK),
+            (("severity", "impact", "score"), LEVEL_RANK),
+            (("severity", "likelihood", "score"), LEVEL_RANK),
+            (("confidence", "score"), LEVEL_RANK),
+            (("evidence_kind",), EVIDENCE_RANK),
+        ):
+            o, n = old, new
+            for k in path:
+                o, n = o[k], n[k]
+            if rank[n] > rank[o]:
+                out.append(".".join(path))
+    return out
+
+
 def cmd_add(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     c.load_metadata(run_dir)
@@ -74,13 +107,42 @@ def cmd_add(args: argparse.Namespace) -> None:
     if existing and not args.replace:
         c.die(f"{rec['fingerprint']}: already in {c.FINDINGS_FILE}; pass --replace to replace it")
     replaced = None
+    entry = None
+    if existing:
+        old = findings[existing[-1]]
+        if not args.by or not c.is_agent_id(args.by):
+            c.die("--replace needs --by <agent-id> (the re-verifier that wrote the replacement)")
+        strengthened = strengthened_fields(old, rec)
+        if args.confirmed_by is not None and (not c.is_agent_id(args.confirmed_by) or args.confirmed_by == args.by):
+            c.die("--confirmed-by must be a canonical agent id different from --by")
+        if strengthened and not args.confirmed_by:
+            c.die(f"{rec['fingerprint']}: the replacement strengthens {', '.join(strengthened)}; a different fresh verifier must confirm it (--confirmed-by <agent-id>)")
+        entry = {
+            "fingerprint": rec["fingerprint"],
+            "previous_verdict": old["verdict"],
+            "verdict": rec["verdict"],
+            "strengthened": strengthened,
+            "by": args.by,
+            "confirmed_by": args.confirmed_by,
+        }
     for i in reversed(existing):
         replaced = findings.pop(i)["verdict"]
     findings.append(rec)
     findings.sort(key=lambda r: r["fingerprint"])
     c.fail_if(validate_findings(run_dir, findings, target))
     c.write_json(run_dir / c.FINDINGS_FILE, findings)
-    c.emit({"fingerprint": rec["fingerprint"], "verdict": rec["verdict"], "replaced": replaced, "records": len(findings)})
+    if entry is not None:
+        items = c.load_replacements(run_dir)
+        items.append(entry)
+        c.save_replacements(run_dir, items)
+    c.emit({
+        "fingerprint": rec["fingerprint"],
+        "verdict": rec["verdict"],
+        "replaced": replaced,
+        "strengthened": entry["strengthened"] if entry else [],
+        "verdict_changed": bool(entry) and entry["previous_verdict"] != rec["verdict"],
+        "records": len(findings),
+    })
 
 
 def cmd_note(args: argparse.Namespace) -> None:
@@ -112,6 +174,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("run_dir")
     p.add_argument("record")
     p.add_argument("--replace", action="store_true")
+    p.add_argument("--by", help="agent id of the re-verifier whose replacement this is (required with --replace)")
+    p.add_argument("--confirmed-by", help="agent id of the fresh verifier that confirmed a strengthening replacement")
     p.add_argument("--target")
     p.set_defaults(func=cmd_add)
 

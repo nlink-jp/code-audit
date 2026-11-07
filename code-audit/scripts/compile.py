@@ -28,7 +28,7 @@ L = {
         "title": "code-audit 報告書",
         "run": "実行の事実",
         "run_id": "run_id", "repo": "リポジトリ", "source_ref": "source ref", "dirty": "作業ツリーに未コミットの変更", "profile": "プロファイル",
-        "budget": "予算（呼び出し回数）", "invocations": "実績の呼び出し回数", "status": "run_status", "prior": "持ち越した過去の実行", "policy": "実行方針", "created": "開始",
+        "budget": "予算（呼び出し回数）", "invocations": "実績の呼び出し回数", "status": "run_status", "prior": "持ち越した過去の実行", "policy": "実行方針", "created": "開始", "replacements": "再検証で置換したレコード", "replacements_value": "{n} 件（うち強化 {s} 件、いずれも別の新しい検証者が確認）",
         "yes": "あり", "no": "なし", "none": "なし", "unset": "未設定", "th_item": "項目", "th_value": "値",
         "partial": "この実行は部分的な網羅です。",
         "partial_quick": "quick プロファイルはハンター 1 波と批評 1 回の事前宣言された早期終了であり、網羅の完了を意味しません。",
@@ -57,7 +57,7 @@ L = {
         "title": "code-audit report",
         "run": "Run facts",
         "run_id": "run_id", "repo": "repository", "source_ref": "source ref", "dirty": "uncommitted changes in the worktree", "profile": "profile",
-        "budget": "budget (invocations)", "invocations": "actual invocations", "status": "run_status", "prior": "prior runs carried", "policy": "execution policy", "created": "started",
+        "budget": "budget (invocations)", "invocations": "actual invocations", "status": "run_status", "prior": "prior runs carried", "policy": "execution policy", "created": "started", "replacements": "records replaced after re-verification", "replacements_value": "{n} ({s} strengthening, each confirmed by a second fresh verifier)",
         "yes": "yes", "no": "no", "none": "none", "unset": "unset", "th_item": "Item", "th_value": "Value",
         "partial": "This run is a partial pass.",
         "partial_quick": "The quick profile is a pre-declared early stop (one hunter wave, one critic) and is not evidence of complete coverage.",
@@ -118,7 +118,8 @@ def kind_label(rec: dict, t: dict) -> str:
     return t["kind_source"]
 
 
-def render_report(lang: str, meta: dict, units: list, findings: list, candidates: dict, notes: list) -> str:
+def render_report(lang: str, meta: dict, units: list, findings: list, candidates: dict, notes: list, replacements: list | None = None) -> str:
+    replacements = replacements or []
     t = L[lang]
     uid = {u["coverage_id"]: u for u in units}
     confirmed = sorted((r for r in findings if r["verdict"] == "confirmed"), key=lambda r: (SEVERITY_RANK[r["severity"]["overall"]], r["fingerprint"]))
@@ -145,6 +146,9 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
         [t["policy"], meta["execution_policy"]],
         [t["created"], plain(meta["created"])],
     ]
+    if replacements:
+        strong = sum(1 for r in replacements if r.get("strengthened"))
+        rows.append([t["replacements"], t["replacements_value"].format(n=len(replacements), s=strong)])
     out += table([t["th_item"], t["th_value"]], rows)
     partial = []
     if meta["profile"] == "quick":
@@ -333,9 +337,10 @@ def main(argv: list[str] | None = None) -> None:
     findings = c.load_findings(run_dir)
     candidates = c.load_candidates(run_dir)
     notes = c.load_notes(run_dir)
+    replacements = c.load_replacements(run_dir)
     written = []
     for lang, name, nv_name in (("ja", "REPORT.ja.md", "NEEDS-VALIDATION.ja.md"), ("en", "REPORT.md", "NEEDS-VALIDATION.md")):
-        (run_dir / name).write_text(render_report(lang, meta, units, findings, candidates, notes), encoding="utf-8")
+        (run_dir / name).write_text(render_report(lang, meta, units, findings, candidates, notes, replacements), encoding="utf-8")
         (run_dir / nv_name).write_text(render_needs_validation(lang, meta, findings), encoding="utf-8")
         written += [name, nv_name]
     c.emit({"written": written, "confirmed": sum(1 for r in findings if r["verdict"] == "confirmed"), "needs_validation": sum(1 for r in findings if r["verdict"] == "needs_validation"), "rejected": sum(1 for r in findings if r["verdict"] == "rejected")})

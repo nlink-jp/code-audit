@@ -12,19 +12,19 @@ coverage ledger and a human-approved cost gate. Hunting classes come from the
 organization's recorded defects (MCP servers, CLIs, LLM agent runtimes)
 beside generic classes. Invoked as `/code-audit <target-dir> ...`.
 
-**Status: Phase 1, cuts (1) and (2) done.** The five bookkeeping scripts,
-the data contracts, the four hunting-class files (52 classes, every source
-verified against the knowledge checkout and the ADR directory on 2026-11-08)
-and the six-phase SKILL.md exist and are tested for `quick`. Cut (3) — the
-standard profile's later waves, the second verification stage with the
-replacement rule, and `--prior` wiring in SKILL.md — is next; SKILL.md marks
-those sections and tells the parent to run `quick` until then.
+**Status: Phase 1 complete (cuts 1–3), not released.** The five bookkeeping
+scripts, the data contracts, the four hunting-class files (52 classes, every
+source verified against the knowledge checkout and the ADR directory on
+2026-11-08) and the six-phase SKILL.md for both profiles exist and are
+tested over the fixture repository. Phase 3 (E2E on two real repositories
+with cost recorded, the pre-release independent verification pass, the
+v0.1.0 release) has not started.
 
 ## Key commands
 
 | Command | Purpose |
 |---------|---------|
-| `make check` (= `make test`) | Structural validation + script behaviour tests (49 tests) |
+| `make check` (= `make test`) | Structural validation + script behaviour tests (52 tests) |
 | `make install` | Build the zip and unpack it into `~/.claude/skills/code-audit` |
 | `make install DEST=<path>` | Unpack into a custom skills directory |
 | `make uninstall` | Remove the installed copy |
@@ -37,7 +37,7 @@ Bundled scripts (stdlib-only Python 3.9+; `--help` on each):
 |--------|-------------|------|
 | `run.py` | `init`, `set-budget`, `count`, `set-status`, `validate`, `exec` | `run-metadata.json`, `checks/<id>.log` |
 | `ledger.py` | `seed [--prior]`, `assign`, `record`, `merge-critic`, `decide`, `defer`, `abandon`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json` (and appends hunter notes to `notes.json`) |
-| `findings.py` | `validate`, `add [--replace]`, `note` | `findings.json`, `notes.json` |
+| `findings.py` | `validate`, `add [--replace --by <agent> [--confirmed-by <agent>]]`, `note` | `findings.json`, `replacements.json`, `notes.json` |
 | `compile.py` | (run dir) | `REPORT.ja.md`, `REPORT.md`, `NEEDS-VALIDATION.ja.md`, `NEEDS-VALIDATION.md` |
 | `classes.py` | `list`, `size`, `check-knowledge [--adr]` | nothing; checks `classes/*.md` |
 
@@ -90,6 +90,7 @@ code-audit/
 | `coverage-ledger.json` | `ledger.py` | units: canonical refs → `coverage_id`, starting paths + `source_digests`, prior_status, state, owner, checks, fingerprints, decisions, archived `attempts` |
 | `candidates.json` | `ledger.py` | `candidates` (hunter-proposed, pending), `carried` (from prior runs), `decided`, `suppressed` (prior rejected, same source), `uncovered`, `resolved_prior_leads` |
 | `findings.json` | `findings.py` | decided records, sorted by fingerprint |
+| `replacements.json` | `findings.py add --replace` | every re-verification replacement: previous and new verdict, the strengthened fields, who wrote it, who confirmed it |
 | `notes.json` | `ledger.py record` / `findings.py note` | hardening and out-of-scope notes with the author's agent id |
 | `architecture.md`, `proposals.json`, `agents/<id>.json` | the parent | reconnaissance summary, the unit proposals given to `seed`, the raw return of every sub-agent |
 | `REPORT*.md`, `NEEDS-VALIDATION*.md` | `compile.py` | derived reports |
@@ -127,6 +128,15 @@ code-audit/
   archives the attempt (status `in_progress`, the reason) and returns the
   agent's units to `planned`; `assign` then refuses that agent, so the unit
   gets a fresh owner or a `defer`. `defer` itself takes planned units only.
+- **The replacement rule is enforced, not described.** `findings.py add
+  --replace` needs `--by <agent>`; it ranks the old and new record on verdict
+  (rejected < needs_validation < confirmed), `severity.overall`, `impact`,
+  `likelihood`, `confidence` and `evidence_kind`, and refuses a replacement
+  that strengthens any of them unless `--confirmed-by` names a different
+  agent. Prose fields cannot be ranked; SKILL.md tells the parent to treat a
+  widened root cause as strengthening. A verdict-changing replacement is
+  followed by `ledger.py decide` again — `decide` takes a re-decision for a
+  fingerprint already in `decided` and updates the units' `decisions`.
 - **Candidates nobody decided stay in the queue** and `compile.py` lists
   them under "Candidates not verified" with no verdict and no severity; the
   parent sets the run `incomplete` when that happens.

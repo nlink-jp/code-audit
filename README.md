@@ -5,11 +5,12 @@ vulnerabilities that actually cross a trust boundary, and shows what was
 covered in a ledger. Design: the [RFP](docs/en/code-audit-rfp.md)
 (Japanese primary: [RFP (ja)](docs/ja/code-audit-rfp.ja.md)).
 
-> **Status: under construction.** The bookkeeping scripts, the data
-> contracts, the hunting classes and the six-phase workflow of SKILL.md exist
-> and are tested for the `quick` profile. The `standard` profile's later
-> hunting waves, second verification stage and `--prior` carry-over are the
-> next cut; SKILL.md says so and runs `quick` until then. v0.1.0 ships both.
+> **Status: under construction — Phase 1 complete, not yet released.** The
+> bookkeeping scripts, the data contracts, the hunting classes and the
+> six-phase SKILL.md exist for both profiles, with tests over a fixture
+> repository. What remains before v0.1.0 is Phase 3: end-to-end runs on two
+> real repositories with the cost recorded, and the independent verification
+> pass over the implementation.
 
 **What it will do.** The parent agent runs six phases over isolated
 sub-agents: reconnaissance; coverage-led hunting waves; adversarial validation
@@ -73,7 +74,14 @@ runs the allowed tests once; a cost gate that shows the expected number of
 agent invocations and waits for approval; hunting over ledger units, each
 hunter reading only its units' classes; adversarial verification of every
 candidate by a fresh agent that reconstructs the preventing layers before
-judging; independent re-verification (`standard`); and the compiled reports.
+judging; independent re-verification (`standard`) under a replacement rule
+— a re-verifier's replacement that keeps or weakens a record is applied, one
+that strengthens the verdict, severity, confidence or evidence kind is
+refused by `findings.py add` until a second fresh verifier confirms it; and
+the compiled reports. With `--prior <run-dir>`, prior `confirmed` and
+`needs_validation` records whose cited sources are unchanged are re-verified
+first, prior `rejected` claims are suppressed (the unit is still hunted), and
+every unit carries what the last run concluded for it.
 
 Hunting classes (`code-audit/classes/`): `generic.md` for every repository
 and one file per product type — `mcp-server.md`, `cli.md`,

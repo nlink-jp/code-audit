@@ -437,3 +437,14 @@ independent pass), it sits beside compliance-review and incident-review.
   reconstruction of preventing layers is visible. 52 classes (generic 9,
   MCP 11, CLI 14, agent runtime 18), 106 sources checked against the
   knowledge and ADR checkouts.
+- **2026-11-08 adjustments while implementing cut (3)**: the replacement
+  rule is enforced by `findings.py add --replace` instead of staying prose.
+  `--by <agent>` is required; the old and new record are ranked on verdict,
+  `severity.overall` / impact / likelihood, confidence and evidence kind, and
+  a strengthening replacement is refused unless `--confirmed-by` names a
+  different agent. Prose strengthening (a widened root cause) cannot be
+  measured, so SKILL.md tells the parent to treat it as strengthening and pass
+  `--confirmed-by`. Replacements are logged in `replacements.json` (owned by
+  findings.py) and counted in the report's run facts. After a verdict-changing
+  replacement the parent calls `ledger.py decide` again (it now accepts a
+  re-decision for a fingerprint already decided).

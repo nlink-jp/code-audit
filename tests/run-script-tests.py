@@ -35,7 +35,7 @@ SAMPLE_REPO = FIXTURES / "sample-repo"
 
 STDLIB = set(getattr(sys, "stdlib_module_names", ()))  # Python 3.10+; empty on 3.9
 ABSOLUTE_PATH = re.compile(r"(?<![\w/])/(?:Users|home|private|Volumes)/")
-OWNED_FILES = ("coverage-ledger.json", "findings.json", "candidates.json", "run-metadata.json", "notes.json")
+OWNED_FILES = ("coverage-ledger.json", "findings.json", "candidates.json", "run-metadata.json", "notes.json", "replacements.json")
 OWNING_SCRIPTS = ("ledger.py", "findings.py", "run.py")
 
 
@@ -503,6 +503,40 @@ class LedgerTests(RunFixture):
         self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-2", u2))
         self.ok(run("ledger.py", "validate", str(self.run_dir)))
 
+    def test_standard_waves_run_until_the_critic_stops(self) -> None:
+        self.hunt()
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "merge-critic", str(self.run_dir), str(self.fill("critic-result.json")), "--target", str(self.target)))
+        planned = self.ok(run("ledger.py", "status", str(self.run_dir)))["planned"]
+        self.assertEqual(len(planned), 2)
+        self.assertIn(u2, planned)
+        new_unit = next(cid for cid in planned if cid != u2)
+        # wave 2: the previous owner is refused, a fresh hunter takes both planned units
+        self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u2), "fresh owner")
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-2", u2, new_unit))
+        result = {
+            "agent_id": "hunter-2",
+            "units": [
+                {"coverage_id": u2, "disposition": "covered", "reviewed_paths": ["app/files.py", "tests/test_files.py"],
+                 "checks": [{"agent_id": "hunter-2", "reviewed_paths": ["app/files.py", "tests/test_files.py"], "invariant": "no caller-controlled value reaches a shell, query or template, including through list_user_files", "method": "existing_test", "result": "list_user_files returns names to the caller and nothing interprets them", "check_log": "checks/unit-tests.log"}],
+                 "candidate_fingerprints": [], "unresolved": []},
+                {"coverage_id": new_unit, "disposition": "covered", "reviewed_paths": ["app"],
+                 "checks": [{"agent_id": "hunter-2", "reviewed_paths": ["app"], "invariant": "no committed secret or debug toggle under app/", "method": "source", "result": "two small modules, no constants that look like credentials, no debug flag", "check_log": None}],
+                 "candidate_fingerprints": [], "unresolved": []},
+            ],
+            "candidates": [], "notes": [], "uncovered": [],
+        }
+        out = self.ok(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "wave2.json"))))
+        self.assertEqual(out["units"], {u2: "covered", new_unit: "covered"})
+        units = {u["coverage_id"]: u for u in self.ledger()}
+        self.assertEqual((units[u2]["wave"], units[u2]["agent_id"], len(units[u2]["attempts"])), (2, "hunter-2", 1))
+        # the second critic finds nothing more: the waves end
+        stop = {"agent_id": "critic-2", "missing_units": [], "reassign_ids": [], "resolved_prior_leads": [], "stop": True}
+        out = self.ok(run("ledger.py", "merge-critic", str(self.run_dir), str(self.write_json(stop, "critic2.json")), "--target", str(self.target)))
+        self.assertEqual((out["critic_stop"], out["work_remaining"], out["planned"]), (True, False, []))
+        self.ok(run("ledger.py", "validate", str(self.run_dir)))
+        self.assertEqual(self.ok(run("ledger.py", "status", str(self.run_dir)))["counts"], {"candidate": 1, "covered": 2})
+
     def test_merge_critic_quick_defers_instead(self) -> None:
         quick = self.tmpdir / "out" / "quick"
         self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(quick), "--profile", "quick"))
@@ -586,14 +620,80 @@ class FindingsTests(RunFixture):
         self.hunt()
         rec = self.candidate_record(0)
         self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a.json"))))
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a2.json"))), "pass --replace")
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a3.json")), "--replace"), "needs --by")
         rec["severity"]["overall"] = "medium"
-        out = self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "b.json")), "--replace"))
-        self.assertEqual((out["replaced"], out["records"]), ("confirmed", 1))
+        out = self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "b.json")), "--replace", "--by", "reverifier-1"))
+        self.assertEqual((out["replaced"], out["records"], out["strengthened"], out["verdict_changed"]), ("confirmed", 1, [], False))
+        log = json.loads((self.run_dir / "replacements.json").read_text(encoding="utf-8"))
+        self.assertEqual(log, [{"fingerprint": rec["fingerprint"], "previous_verdict": "confirmed", "verdict": "confirmed", "strengthened": [], "by": "reverifier-1", "confirmed_by": None}])
+
+    def test_strengthening_replacement_needs_a_second_fresh_verifier(self) -> None:
+        self.hunt()
+        rec = self.candidate_record(0)
+        rec["severity"]["overall"] = "medium"
+        rec["severity"]["likelihood"]["score"] = "medium"
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a.json"))))
+        # wording and line numbers: applied directly
+        reworded = json.loads(json.dumps(rec))
+        reworded["description"] = "A caller-supplied name with '../' selects a file outside base_dir."
+        reworded["evidence"][0]["line"] = 8
+        out = self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(reworded, "w.json")), "--replace", "--by", "reverifier-1"))
+        self.assertEqual(out["strengthened"], [])
+        # weakening: applied directly, and the verdict change is reported
+        weaker = json.loads(json.dumps(self.candidate_record(1)))
+        weaker["fingerprint"] = rec["fingerprint"]
+        weaker["coverage_ids"] = rec["coverage_ids"]
+        out = self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(weaker, "nv.json")), "--replace", "--by", "reverifier-2"))
+        self.assertEqual((out["verdict"], out["verdict_changed"], out["strengthened"]), ("needs_validation", True, []))
+        # strengthening the verdict back to confirmed: refused without a confirmer
+        proc = run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "c.json")), "--replace", "--by", "reverifier-3")
+        self.refused(proc, "strengthens verdict")
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "c2.json")), "--replace", "--by", "reverifier-3", "--confirmed-by", "reverifier-3"), "different from --by")
+        out = self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "c3.json")), "--replace", "--by", "reverifier-3", "--confirmed-by", "reverifier-4"))
+        self.assertEqual(out["strengthened"], ["verdict"])
+        # strengthening severity, likelihood, confidence or evidence kind within confirmed
+        stronger = json.loads(json.dumps(rec))
+        stronger["severity"]["overall"] = "high"
+        stronger["severity"]["likelihood"]["score"] = "high"
+        proc = run("findings.py", "add", str(self.run_dir), str(self.write_json(stronger, "s.json")), "--replace", "--by", "reverifier-5")
+        self.refused(proc, "strengthens severity.overall, severity.likelihood.score")
+        stronger = json.loads(json.dumps(rec))
+        stronger["evidence_kind"] = "existing_test"
+        stronger["check_log"] = "checks/unit-tests.log"
+        stronger["confidence"]["score"] = "high"
+        proc = run("findings.py", "add", str(self.run_dir), str(self.write_json(stronger, "e.json")), "--replace", "--by", "reverifier-5")
+        self.refused(proc, "strengthens confidence.score, evidence_kind")
+        log = json.loads((self.run_dir / "replacements.json").read_text(encoding="utf-8"))
+        self.assertEqual([(e["by"], e["confirmed_by"], e["strengthened"]) for e in log], [("reverifier-1", None, []), ("reverifier-2", None, []), ("reverifier-3", "reverifier-4", ["verdict"])])
 
     def test_note_appends_to_notes_json(self) -> None:
         out = self.ok(run("findings.py", "note", str(self.run_dir), "--agent", "verifier-1", "--kind", "hardening", "--text", "pin the test runner version"))
         self.assertEqual(out["notes"], 1)
         self.refused(run("findings.py", "note", str(self.run_dir), "--agent", "Verifier", "--kind", "hardening", "--text", "x"), "canonical agent id")
+
+    def test_redecide_after_a_verdict_changing_replacement(self) -> None:
+        self.hunt()
+        rec = self.candidate_record(0)
+        fp = rec["fingerprint"]
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a.json"))))
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", "confirmed"))
+        weaker = json.loads(json.dumps(self.candidate_record(1)))
+        weaker["fingerprint"], weaker["coverage_ids"] = fp, rec["coverage_ids"]
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(weaker, "nv.json")), "--replace", "--by", "reverifier-1"))
+        # the ledger still says confirmed until the parent re-decides; decide checks the record's verdict
+        self.refused(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", "confirmed"), "says needs_validation")
+        out = self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", "needs_validation"))
+        self.assertEqual(out["previous_verdict"], "confirmed")
+        u1, _ = self.unit_ids()
+        unit = next(u for u in self.ledger() if u["coverage_id"] == u1)
+        self.assertEqual(unit["decisions"][fp], "needs_validation")
+        cands = json.loads((self.run_dir / "candidates.json").read_text(encoding="utf-8"))
+        self.assertEqual([d for d in cands["decided"] if d["fingerprint"] == fp], [{"fingerprint": fp, "verdict": "needs_validation"}])
+        self.ok(run("ledger.py", "validate", str(self.run_dir)))
+        self.ok(run("compile.py", str(self.run_dir)))
+        en = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
+        self.assertIn("| records replaced after re-verification | 1 (0 strengthening", en)
 
 
 class PriorRunTests(RunFixture):

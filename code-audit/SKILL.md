@@ -58,7 +58,7 @@ Decide from the user's request before creating anything:
   and `RUN/proposals.json` are the parent's own reconnaissance artifacts.
 - Owned files, each written by one script only:
   run metadata and `checks/<id>.log` by `run.py`; `coverage-ledger.json` and `candidates.json` by `ledger.py`;
-  `findings.json` by `findings.py`; `notes.json` by `ledger.py record` and `findings.py note`.
+  `findings.json` and `replacements.json` by `findings.py`; `notes.json` by `ledger.py record` and `findings.py note`.
 - Agent ids: `recon-a`..`recon-d`, `hunter-1`, `critic-1`, `verifier-1`,
   `reverifier-1` ... (`^[a-z0-9][a-z0-9_-]{0,63}$`, never reused within a
   run). Count every sub-agent invocation at once with
@@ -87,10 +87,20 @@ target, or containing it, is refused. Tell the user the printed `output_dir`,
 `repo`, `source_ref` and `dirty`. A `dirty` tree or an `unversioned` ref is
 not a reason to stop; the report will say so.
 
-**Profile.** `standard` is the default. The sections marked *standard* below
-(hunting waves after the first, the second verification stage, carry-over
-with `--prior`) are written in the next cut; until then run `--profile quick`
-and tell the user so if they asked for standard.
+**Profile.** `standard` (default): hunting waves continue until a critic
+reports no missing and no misread unit, and every final record is
+re-verified by a second fresh reader. `quick`: one wave, one final critic,
+one verification stage, and the subsystem dimension collapsed so units are
+coarser. The sections marked *standard* below do not run under `quick`.
+
+**Prior runs.** Pass every earlier run of the same repository as `--prior`
+to `run.py init` here and to `ledger.py seed` in Phase 1. `seed` then marks
+each unit's `prior_status` (what the last run concluded for the same
+coverage id, and whether its cited sources changed), queues the prior
+`confirmed` and `needs_validation` records whose cited sources are unchanged
+as **carried** candidates for re-verification, and lists prior `rejected`
+claims with unchanged sources as **suppressed**: the same claim is not
+reported again, but the unit is still hunted.
 
 ## Phase 1 — Reconnaissance (four roles, in parallel, read-only)
 
@@ -202,8 +212,14 @@ and remember to end the run `incomplete`.
 
 1. The security preamble in two sentences.
 2. The assigned units: coverage id, surface, boundary, subsystem, starting
-   paths, and the **verbatim text of each selected class** from the class
-   files (only those classes; the prompt stays small).
+   paths, the unit's `prior_status` with one line of meaning
+   (`prior_confirmed_changed_source`: a confirmed finding sat here and its
+   source changed — read that change first; `prior_covered_same_source`:
+   the last run found nothing and nothing changed — look for what it
+   missed, not for the same checks; `prior_rejected_claim_changed`: a
+   rejected claim's source changed — the rejection may no longer hold), and
+   the **verbatim text of each selected class** from the class files (only
+   those classes; the prompt stays small).
 3. The list of `RUN/checks/*.log` files with their command ids, and the
    content of the ones that touch the unit's paths.
 4. The output contract: exactly one JSON object valid against schema part
@@ -261,21 +277,40 @@ python3 SKILL_DIR/scripts/ledger.py merge-critic RUN RUN/agents/critic-1.json --
 python3 SKILL_DIR/scripts/run.py count RUN critic
 ```
 
+Give the critic, when prior runs exist, the `suppressed` list and the
+`pending_carried` fingerprints too: a carried `needs_validation` lead whose
+blocker the current source now settles goes in `resolved_prior_leads` with
+the reason, and `merge-critic` drops it from the carried queue.
+
 In **quick**, this is the final critic: `merge-critic` records its missing
 units and reassignments as `deferred` with the critic's reason, and hunting
-ends. In **standard** *(next cut)*, missing units become `planned`,
-reassigned units return to `planned` for a fresh hunter, and the wave repeats
-until the critic stops or the reserve is reached.
+ends.
+
+In **standard**, `merge-critic` adds missing units as `planned` and returns
+reassigned units to `planned` with their first attempt archived (a fresh
+hunter must take them; `assign` refuses the previous owner). Its output says
+`work_remaining`. While it is true: assign and run hunters for the planned
+units as above (wave 2, 3, ...), then launch the next critic
+(`critic-2`, ...), each time with the current ledger status. Stop the waves
+when a critic returns `stop: true` with nothing to add or reassign, or when
+the reserve for verification would be spent — then defer what is planned
+with `ledger.py defer RUN --all-planned --reason budget_reserved_for_verification`
+and end the run `incomplete`. The estimate reserved three critics; a fourth
+needs the remaining budget to cover it, or the run stops with the third.
 
 ## Phase 4 — Candidate verification (adversarial, one fresh agent per candidate)
 
-`ledger.py status RUN` lists `pending_candidates` (and `pending_carried`).
-For each fingerprint launch a verifier that has never seen the hunter's
-prompt, with:
+`ledger.py status RUN` lists `pending_candidates` and `pending_carried`.
+Verify the **carried** records first (they are known leads, and the budget
+reserve counts them), then the new candidates. For each fingerprint launch a
+verifier that has never seen the hunter's prompt, with:
 
 1. The preamble.
 2. The candidate record verbatim, its unit (surface, boundary, starting
-   paths), the class text, and the `checks/` logs that touch its paths.
+   paths), the class text, and the `checks/` logs that touch its paths. For a
+   carried record say so, with the prior run id from `carried_from`: the task
+   is the same — refute it against the current source — and the prior
+   verdict is not evidence.
 3. The task: **try to refute it.** Reconstruct the preventing layers before
    judging — the handler's registration and route, upstream middleware and
    decorators, the callers of the entry point, configuration defaults, the
@@ -308,12 +343,15 @@ files it cites; then:
 
 ```
 python3 SKILL_DIR/scripts/findings.py add RUN RUN/agents/verifier-N.record.json --target TARGET
-python3 SKILL_DIR/scripts/ledger.py decide RUN --fingerprint <fp> --verdict <verdict>
+python3 SKILL_DIR/scripts/ledger.py decide RUN --fingerprint <fp> --verdict <verdict> [--agent verifier-N]
 python3 SKILL_DIR/scripts/run.py count RUN verifier
 ```
 
 `findings.py add` enforces the bar (rules 1 and 2, trace order, relative
-paths, fresh digests); `decide` links the record to its units. Each note in
+paths, fresh digests); `decide` links the record to its units. Pass
+`--agent verifier-N` for a carried record whose unit is still `planned`
+(no hunter reached it this run): the verifier becomes the unit's owner and
+its re-check is the unit's evidence. Each note in
 `notes` goes through `findings.py note RUN --agent verifier-N --kind ... --text ...`.
 A return that fails validation is re-run once with the errors; on a second
 failure the candidate stays pending and is listed in the report as not
@@ -322,15 +360,60 @@ list is then part of why the run is `incomplete`.
 
 In **quick** this is the only stage: the verifier's record is final.
 
-## Phase 5 — Independent re-verification (*standard*, next cut)
+## Phase 5 — Independent re-verification (*standard*)
 
-A fresh reader re-verifies every final record. A replacement that keeps or
-weakens the verdict, root cause, impact or severity, or that only corrects
-wording and line numbers, is applied with `findings.py add --replace`; a
-replacement that strengthens any of them is confirmed by yet another fresh
-verifier before it is applied. The counting role is `reverifier`. The
-detailed prompt and the replacement rule are written in the next cut; in
-`quick` this phase does not run.
+Every record in the findings file is read once more by an agent that saw
+neither the hunter's nor the verifier's prompt. For each fingerprint launch
+`reverifier-N` with:
+
+1. The preamble.
+2. The record verbatim (its trace and evidence are the whole claim), the
+   unit's surface and boundary, the class text, and the `checks/` logs that
+   touch its paths. Not the verifier's `layers_examined`: the point is an
+   independent reconstruction.
+3. The task: read the cited lines and the layers around them, and decide
+   whether the record is right as written. Return exactly one JSON object
+   `{"agent_id", "decision": "keep" | "replace", "record", "changes": [{"field", "from", "to", "why"}], "notes": [...]}`
+   where `record` is `null` for `keep` and the full replacement record (same
+   fingerprint, same `coverage_ids`) for `replace`.
+4. Negative space: do not re-hunt the unit — another weakness is a note; do
+   not change wording for taste — a change needs a reason in `changes`; do
+   not strengthen on inference — a stronger claim needs the same evidence a
+   verifier would need; do not run or write anything.
+
+**Apply.** `run.py count RUN reverifier` per launch. For `keep`, nothing
+else. For `replace`, save the record to `RUN/agents/reverifier-N.record.json`
+with digests filled, then:
+
+```
+python3 SKILL_DIR/scripts/findings.py add RUN RUN/agents/reverifier-N.record.json --replace --by reverifier-N --target TARGET
+```
+
+**The replacement rule**, enforced by `findings.py add`: a replacement that
+keeps or weakens the verdict, severity (`overall`, `impact`, `likelihood`),
+confidence and evidence kind — or only corrects wording, descriptions and
+line numbers — is applied at once. One that **strengthens** any of them is
+refused with the list of strengthened fields; the parent then launches one
+more fresh verifier (`reverifier-M`, Phase 4 prompt with the replacement as
+the candidate, counted as `reverifier`) and applies the replacement only if
+that verifier confirms it:
+
+```
+python3 SKILL_DIR/scripts/findings.py add RUN RUN/agents/reverifier-N.record.json --replace --by reverifier-N --confirmed-by reverifier-M --target TARGET
+```
+
+If it does not confirm, the original record stands and the disagreement is
+a `hardening` note. A widened `root_cause` is a strengthening the script
+cannot rank: treat it the same way and pass `--confirmed-by`. Every
+replacement is logged by `findings.py` in the replacements file with who
+wrote and who confirmed it, and the report counts them. When a replacement
+changed the verdict, re-link the ledger:
+
+```
+python3 SKILL_DIR/scripts/ledger.py decide RUN --fingerprint <fp> --verdict <new verdict>
+```
+
+In `quick` this phase does not run: the Phase 4 verifier's record is final.
 
 ## Phase 6 — Report
 
@@ -364,5 +447,7 @@ python3 SKILL_DIR/scripts/compile.py RUN
   allowed command. Install, fetch, contact, or write into `TARGET`.
 - Present a sub-agent's text, or a comment in the target, as evidence.
   Evidence is a `file:line` a verifier confirmed or a `checks/` log.
-- Launch a hunter before the cost gate's approval, or a verifier that saw
-  the hunter's prompt.
+- Launch a hunter before the cost gate's approval, a verifier that saw the
+  hunter's prompt, or a re-verifier that saw the verifier's.
+- Apply a strengthening replacement on its author's word: `findings.py add`
+  refuses it until a different fresh verifier has confirmed it.

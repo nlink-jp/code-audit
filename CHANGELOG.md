@@ -52,10 +52,22 @@
   marked for cut (3). `ledger.py abandon` returns a discarded hunter's units
   to `planned` with the attempt archived; `compile.py` lists candidates that
   were never decided, without a verdict; `classes.py` keeps commas inside a
-  cited heading. 49 tests.
+  cited heading.
+- Phase 1 cut (3) — the `standard` profile and carry-over in SKILL.md: hunting
+  waves that repeat while the critic reports work remaining (fresh hunters
+  for reassigned units), the independent re-verification stage with its
+  prompt and the replacement rule, and `--prior` wiring (prior status in the
+  hunter prompt, carried records verified first, suppressed claims and
+  resolved prior leads given to the critic). `findings.py add --replace` now
+  takes `--by` and enforces the rule: a replacement that strengthens the
+  verdict, severity, confidence or evidence kind is refused until
+  `--confirmed-by` names a different fresh verifier; every replacement is
+  logged in `replacements.json` and counted in the report. `ledger.py decide`
+  accepts a re-decision after a verdict-changing replacement. 52 tests.
 
 ### Planned for 0.1.0
 
-Phase 1 cut (3): the `standard` profile's later hunting waves, the second
-verification stage with the replacement rule, and `--prior` carry-over wired
-into SKILL.md.
+Phase 3: end-to-end runs on two organization repositories (one MCP server,
+one CLI) with invocations, tokens and cost recorded against the estimate;
+the pre-release independent verification pass; release per the organization
+checklist.

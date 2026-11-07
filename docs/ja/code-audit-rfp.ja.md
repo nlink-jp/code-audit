@@ -387,3 +387,12 @@ compliance-review / incident-review と並ぶ。
   ための配置）。(e) 検証者の出力は record の外に `layers_examined` を持ち、
   防ぐ層の再構成を見える形で返す。クラス数は汎用 9・MCP 11・CLI 14・
   エージェントランタイム 18 の 52、出典 106 件を knowledge と ADR の実物で検査。
+- **2026-11-08 区切り (3) の実装時の調整**: 置換の規則を散文のままにせず
+  `findings.py add --replace` が守る。`--by <agent>` を必須にし、判定・
+  `severity.overall` / impact / likelihood・confidence・根拠種別を順位で比べ、
+  強める置換は別の agent を `--confirmed-by` に添えない限り拒む。文章の
+  強化（根本原因の拡大）は機械で測れないので、SKILL.md が「強化として扱い
+  `--confirmed-by` を付ける」と指示する。置換は `replacements.json`（findings.py
+  所有）に記録し、報告書の run 事実に件数を出す。判定が変わった置換のあとは
+  `ledger.py decide` を再度呼ぶ（decided 済みの fingerprint への再判定を受ける
+  ようにした）。

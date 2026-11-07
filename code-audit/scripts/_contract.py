@@ -37,6 +37,7 @@ METADATA_FILE = "run-metadata.json"
 COMMANDS_FILE = "commands.json"
 CANDIDATES_FILE = "candidates.json"
 NOTES_FILE = "notes.json"
+REPLACEMENTS_FILE = "replacements.json"
 CHECKS_DIR = "checks"
 
 
@@ -327,3 +328,17 @@ def load_notes(run_dir: Path) -> list:
 
 def save_notes(run_dir: Path, notes: list) -> None:
     write_json(run_file(run_dir, NOTES_FILE), notes)
+
+
+def load_replacements(run_dir: Path) -> list:
+    path = run_file(run_dir, REPLACEMENTS_FILE)
+    if not path.exists():
+        return []
+    data = read_json(path)
+    if not isinstance(data, list):
+        die(f"{REPLACEMENTS_FILE}: must be an array")
+    return data
+
+
+def save_replacements(run_dir: Path, items: list) -> None:
+    write_json(run_file(run_dir, REPLACEMENTS_FILE), items)

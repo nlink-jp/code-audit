@@ -699,6 +699,20 @@ def cmd_decide(args: argparse.Namespace) -> None:
     candidates = c.load_candidates(run_dir)
     ids = by_id(units)
     pending = [r for r in candidates["candidates"] if r["fingerprint"] == fp] + [r for r in candidates["carried"] if r["fingerprint"] == fp]
+    decided = [d for d in candidates["decided"] if d["fingerprint"] == fp]
+    if not pending and decided:
+        # Re-decision after a re-verifier's replacement changed the verdict.
+        previous = decided[-1]["verdict"]
+        linked = [u for u in units if fp in u["result_fingerprints"]]
+        if not linked:
+            c.die(f"{fp}: no ledger unit links this fingerprint")
+        for u in linked:
+            u["decisions"][fp] = verdict
+        for d in decided:
+            d["verdict"] = verdict
+        save_ledger(run_dir, units, candidates)
+        c.emit({"fingerprint": fp, "verdict": verdict, "previous_verdict": previous, "units": [u["coverage_id"] for u in linked], "pending": len(candidates["candidates"]) + len(candidates["carried"])})
+        return
     if not pending:
         c.die(f"{fp}: not a pending candidate")
     linked = [u for u in units if fp in u["result_fingerprints"]]
