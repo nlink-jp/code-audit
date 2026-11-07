@@ -59,11 +59,16 @@ Bundled scripts (standard library only; called by the workflow, usable alone):
 
 | Script | Subcommands | Role |
 |--------|-------------|------|
-| `scripts/run.py` | `init` / `set-status` / `exec` | Create `run-metadata.json` and move its status (`in_progress` → `complete` / `incomplete` with reason). `exec` runs only commands the command ledger allows, with an empty environment plus allowlisted variables, the target as working directory and a time limit, writing output to `checks/<id>.log` |
-| `scripts/ledger.py` | `seed [--prior]` / `assign` / `record` / `merge-critic` / `decide` / `defer` / `estimate` / `validate` | Build the coverage ledger (including `prior_status` from carried runs), assign, record hunter results, merge critic output, record verifier decisions, mark budget-starved units `deferred`, estimate, validate. Only this script knows how `coverage_id` is derived and what the state machine allows |
-| `scripts/findings.py` | `validate` / `add` / `carry` / `note` | Structural and semantic validation of `findings.json` (mutually exclusive verdict branches, severity ≤ impact, a confidence cap for source-only evidence, trace ordering, unique sorted fingerprints, one or more blockers). `add` appends one record at a time so the parent never rewrites the whole JSON. `carry` carries from `--prior`. `note` files an out-of-scope observation into `notes.json` |
-| `scripts/compile.py` | (none) | Derive `REPORT.ja.md` / `REPORT.md` / `NEEDS-VALIDATION.ja.md` / `NEEDS-VALIDATION.md` from `findings.json`, the ledger and `notes.json` |
-| `scripts/classes.py` | `check-knowledge <dir>` / `size` | Check that each class's source (knowledge document + heading, or organization ADR number) exists, and check class file size |
+| `scripts/run.py` | `init` / `set-budget` / `count` / `set-status` / `validate` / `exec` | Create `run-metadata.json`, record the approved budget and actual invocation counts, move the status (`in_progress` → `complete` / `incomplete` with reason). `exec` runs only commands the command ledger allows, with an empty environment plus the entry's allowlisted variables, the target as working directory and a time limit, writing output to `checks/<id>.log` |
+| `scripts/ledger.py` | `seed [--prior]` / `assign` / `record` / `merge-critic` / `decide` / `defer` / `estimate` / `validate` / `status` | Build the coverage ledger (carry-over from `--prior`: `prior_status`, same-source confirmed / needs_validation records into the candidate queue, same-source rejected ones into the suppression list), assign, record hunter results, merge critic output, record verifier decisions, mark budget-starved units `deferred`, estimate, validate. Only this script knows how `coverage_id` is derived and what the state machine allows |
+| `scripts/findings.py` | `validate` / `add` / `note` | Structural and semantic validation of `findings.json` (mutually exclusive verdict branches, severity ≤ impact, a confidence cap for source-only evidence, trace ordering, unique sorted fingerprints, one or more blockers). `add` appends one record at a time so the parent never rewrites the whole JSON; with `--target` it checks the cited digests against the current files and refuses a stale record. `note` files an out-of-scope observation into `notes.json` |
+| `scripts/compile.py` | (run dir only) | Derive `REPORT.ja.md` / `REPORT.md` / `NEEDS-VALIDATION.ja.md` / `NEEDS-VALIDATION.md` from `findings.json`, the ledger, `candidates.json` and `notes.json` |
+| `scripts/classes.py` | `list` / `size` / `check-knowledge --knowledge <dir> [--adr <dir>]` | Parse the class files, check their size, and check that each class's source (knowledge document + heading, or organization ADR number) exists |
+
+(Adjustment made while implementing on 2026-11-08: carry-over lives in
+`ledger.py seed --prior` rather than `findings.py carry`. Carry-over sets the
+ledger's `prior_status` and the candidate queue at once, so one script
+writing both keeps the ownership boundary simple.)
 
 ### Input / Output
 
@@ -77,8 +82,9 @@ Contents of the output directory:
 | `architecture.md` | parent | reconnaissance summary (about 1,000 words max) |
 | `commands.json` | parent (a reconnaissance artifact) | ledger of the target's test and check commands. Each row: allowed or forbidden, the reason when forbidden (reaches the network, reads credentials, writes outside the target, fetches dependencies), write locations, time limit |
 | `coverage-ledger.json` | `ledger.py` only | coverage ledger: units of surface × boundary × subsystem × attack class with state, and the source digest of each path a unit cites |
+| `candidates.json` | `ledger.py` only | candidates awaiting validation (hunter proposals), carried records, decided ones, claims suppressed as rejected in a prior run, unassigned surfaces, resolved prior leads |
 | `findings.json` | `findings.py` only | `confirmed` / `needs_validation` / `rejected` records sorted by fingerprint; each record carries the source digest of the paths it cites |
-| `notes.json` | `findings.py` only | out-of-scope observations and hardening notes returned by hunters and verifiers |
+| `notes.json` | `ledger.py record` and `findings.py note` | out-of-scope observations and hardening notes returned by hunters and verifiers |
 | `checks/<id>.log` | `run.py exec` only | record of each existing-test run (command, allowlisted variable names, exit code, output) |
 | `REPORT.ja.md`, `REPORT.md` | `compile.py` | human-facing report; verdicts, severity, evidence kind and coverage summary derived from records |
 | `NEEDS-VALIDATION.ja.md`, `NEEDS-VALIDATION.md` | `compile.py` | unresolved leads, no severity |

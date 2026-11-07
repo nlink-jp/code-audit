@@ -4,28 +4,31 @@ description: Repository-wide vulnerability audit of your own code, run as isolat
 argument-hint: "<target-dir> [--output <dir>] [--profile quick|standard] [--budget <N>] [--prior <run-dir>]... [--knowledge <dir>]"
 ---
 
-# code-audit — scaffold
+# code-audit — under construction
 
-This skill is scaffolded and not yet implemented. The design is fixed in the
-RFP of this repository (`docs/ja/code-audit-rfp.ja.md`, English mirror in
-`docs/en/code-audit-rfp.md`); Phase 1 of its development plan fills in the
-files listed below.
+The bookkeeping scripts and data contracts of this skill exist; the audit
+workflow itself (the six phases and the hunting classes) is not written yet.
+The design is fixed in the RFP of this repository
+(`docs/ja/code-audit-rfp.ja.md`, English mirror in `docs/en/code-audit-rfp.md`).
 
-Until then, loading this skill authorizes **guidance mode only**: answer
-security questions and perform focused reviews from source reading. Do not
-create an output directory, do not launch sub-agents for a full audit, and do
-not present any reading-based conclusion as a verified finding.
+Until the workflow lands, loading this skill authorizes **guidance mode
+only**: answer security questions and perform focused reviews from source
+reading. Do not create an output directory, do not launch sub-agents for a
+full audit, and do not present any reading-based conclusion as a verified
+finding.
 
-## Planned layout
+## Layout
 
-- `scripts/run.py`, `scripts/ledger.py`, `scripts/findings.py`,
-  `scripts/compile.py`, `scripts/classes.py` — stdlib-only Python that keeps
-  the books (run metadata, coverage ledger, findings records, reports,
-  hunting-class sources). The model decides; the scripts record.
-- `schema.json` — the data contract: three findings branches, ledger unit,
-  run metadata, command ledger.
-- `references/severity.md` — the five severity anchors and the high/medium
-  discriminator that `findings.py validate` enforces.
-- `classes/` — hunting classes: one generic file and one file per
+- `scripts/` — stdlib-only Python that keeps the books. The model decides;
+  the scripts record. `run.py` owns run-metadata.json and bounded execution of
+  the target's existing tests; `ledger.py` owns coverage-ledger.json and
+  candidates.json; `findings.py` owns findings.json and notes.json;
+  `compile.py` derives the reports; `classes.py` checks the hunting-class
+  files against their sources.
+- `schema.json` — the data contracts: run metadata, command ledger, ledger
+  unit, hunter and critic results, the three findings branches, notes.
+- `references/severity.md` — the severity and confidence vocabulary and the
+  two rules `findings.py validate` enforces.
+- `classes/` (pending) — hunting classes: one generic file and one file per
   organization product type (MCP server, CLI, LLM agent runtime), each class
   citing its source in the organization's knowledge base or an ADR.

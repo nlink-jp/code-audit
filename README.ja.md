@@ -4,7 +4,8 @@
 見つけ、どこまで見たかを台帳で示す Claude Code Skill。設計は
 [RFP](docs/ja/code-audit-rfp.ja.md)（英訳: [RFP (en)](docs/en/code-audit-rfp.md)）。
 
-> **状態: scaffold。** スキル本体は未実装です。読み込んでもガイダンスモード
+> **状態: 作成中。** 簿記のスクリプトとデータ契約はテスト済みで揃っていますが、
+> SKILL.md の監査手順はまだ書かれていません。読み込んでもガイダンスモード
 > （セキュリティの質問・局所的なレビュー）だけが有効で、フル監査の手順は
 > v0.1.0 で入ります。
 
@@ -65,7 +66,10 @@ make check      # 構造検証 + スクリプトの挙動テスト
 make package    # dist/code-audit-vX.Y.Z.zip（zip ルート = スキルフォルダ）
 ```
 
-同梱スクリプトは標準ライブラリだけの Python 3.9 以上です。貢献者と
+同梱スクリプトは標準ライブラリだけの Python 3.9 以上です（各 `--help`）。
+`run.py`（実行メタデータと対象の既存テストの有界実行）、`ledger.py`
+（網羅台帳と候補の待ち行列）、`findings.py`（所見レコードと覚え書き）、
+`compile.py`（報告書）、`classes.py`（狩りクラスの検査）。貢献者と
 エージェント向けの規則は [`CLAUDE.md`](CLAUDE.md) と [`AGENTS.md`](AGENTS.md)。
 
 ## 謝辞

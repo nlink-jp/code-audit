@@ -5,9 +5,10 @@ vulnerabilities that actually cross a trust boundary, and shows what was
 covered in a ledger. Design: the [RFP](docs/en/code-audit-rfp.md)
 (Japanese primary: [RFP (ja)](docs/ja/code-audit-rfp.ja.md)).
 
-> **Status: scaffold.** The skill is not implemented yet. Loading it
-> authorizes guidance mode only (security questions, focused reviews); the
-> full audit workflow arrives with v0.1.0.
+> **Status: under construction.** The bookkeeping scripts and data contracts
+> exist and are tested; the audit workflow in SKILL.md is not written yet.
+> Loading the skill authorizes guidance mode only (security questions,
+> focused reviews); the full audit workflow arrives with v0.1.0.
 
 **What it will do.** The parent agent runs six phases over isolated
 sub-agents: reconnaissance; coverage-led hunting waves; adversarial validation
@@ -71,8 +72,12 @@ make check      # structural validation + script behaviour tests
 make package    # dist/code-audit-vX.Y.Z.zip (zip root = skill folder)
 ```
 
-Bundled scripts are stdlib-only Python 3.9+. Rules for contributors and
-agents: [`CLAUDE.md`](CLAUDE.md), [`AGENTS.md`](AGENTS.md).
+Bundled scripts are stdlib-only Python 3.9+ (`--help` on each): `run.py`
+(run metadata, bounded execution of the target's existing tests),
+`ledger.py` (coverage ledger and candidate queue), `findings.py` (findings
+records and notes), `compile.py` (reports), `classes.py` (hunting-class
+checks). Rules for contributors and agents: [`CLAUDE.md`](CLAUDE.md),
+[`AGENTS.md`](AGENTS.md).
 
 ## Acknowledgement
 
