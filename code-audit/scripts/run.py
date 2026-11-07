@@ -24,8 +24,8 @@ from __future__ import annotations
 import argparse
 import os
 import re
-import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -123,29 +123,83 @@ def resolve_git_dir(target: Path) -> tuple[Path, Path] | None:
     return gitdir, common
 
 
+# Bounds for the copy into the scratch git-dir: the target may plant a
+# symlink to a device or a huge file under .git, so only regular files are
+# copied, never through a link, and never past these totals.
+COPY_LIMITS = {"bytes": 512 * 1024 * 1024, "files": 200_000, "file_bytes": 512 * 1024 * 1024}
+
+
+class CopyBudgetExceeded(OSError):
+    pass
+
+
+def copy_regular_file(src: Path, dst: Path, budget: dict[str, int]) -> bool:
+    """Copy src to dst if src is a regular file reached without following a
+    link; charge the budget. Returns False when src is not such a file."""
+    try:
+        fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return False
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            return False
+        if st.st_size > budget["file_bytes"] or st.st_size > budget["bytes"] or budget["files"] < 1:
+            raise CopyBudgetExceeded(f"{src}: exceeds the git-dir copy budget")
+        remaining = st.st_size
+        with open(os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as out:
+            while remaining > 0:
+                chunk = os.read(fd, min(1 << 20, remaining))
+                if not chunk:
+                    break
+                out.write(chunk)
+                remaining -= len(chunk)
+        budget["bytes"] -= st.st_size
+        budget["files"] -= 1
+        return True
+    finally:
+        os.close(fd)
+
+
+def copy_regular_tree(src: Path, dst: Path, budget: dict[str, int]) -> None:
+    """Copy the regular files under src, skipping symlinks and special files."""
+    dst.mkdir()
+    with os.scandir(src) as it:
+        for entry in it:
+            if entry.is_symlink():
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                copy_regular_tree(Path(entry.path), dst / entry.name, budget)
+            elif entry.is_file(follow_symlinks=False):
+                copy_regular_file(Path(entry.path), dst / entry.name, budget)
+
+
 def sanitized_git_dir(gitdir: Path, common: Path, scratch: Path) -> dict[str, str] | None:
     """Build a git-dir under scratch that holds the target's HEAD, index,
     refs, packed-refs, shallow list and ignore data, links its object store,
-    and carries a config of our own. Returns the parsed original config."""
-    head = gitdir / "HEAD"
-    if not head.is_file():
+    and carries a config of our own. Returns the parsed original config, or
+    None when the target's git-dir is unusable or exceeds the copy budget."""
+    budget = dict(COPY_LIMITS)
+    try:
+        if not copy_regular_file(gitdir / "HEAD", scratch / "HEAD", budget):
+            return None
+        copy_regular_file(gitdir / "index", scratch / "index", budget)
+        for name in ("packed-refs", "shallow"):
+            copy_regular_file(common / name, scratch / name, budget)
+        for name in ("refs", "reftable"):
+            if (common / name).is_dir() and not (common / name).is_symlink():
+                copy_regular_tree(common / name, scratch / name, budget)
+        (scratch / "refs").mkdir(exist_ok=True)
+        if (common / "info").is_dir() and not (common / "info").is_symlink():
+            (scratch / "info").mkdir()
+            copy_regular_file(common / "info" / "exclude", scratch / "info" / "exclude", budget)
+        os.symlink(common / "objects", scratch / "objects")
+        config_path = common / "config"
+        original: dict[str, str] = {}
+        if config_path.is_file() and not config_path.is_symlink() and config_path.stat().st_size <= 1 << 20:
+            original = parse_git_config(config_path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
         return None
-    shutil.copy(head, scratch / "HEAD")
-    if (gitdir / "index").is_file():
-        shutil.copy(gitdir / "index", scratch / "index")
-    for name in ("packed-refs", "shallow"):
-        if (common / name).is_file():
-            shutil.copy(common / name, scratch / name)
-    for name in ("refs", "reftable"):
-        if (common / name).is_dir():
-            shutil.copytree(common / name, scratch / name, symlinks=False)
-    (scratch / "refs").mkdir(exist_ok=True)
-    if (common / "info" / "exclude").is_file():
-        (scratch / "info").mkdir()
-        shutil.copy(common / "info" / "exclude", scratch / "info" / "exclude")
-    os.symlink(common / "objects", scratch / "objects")
-    config_path = common / "config"
-    original = parse_git_config(config_path.read_text(encoding="utf-8", errors="replace")) if config_path.is_file() else {}
     copied = {k: v for k, v in original.items() if k in CONFIG_COPY and re.match(CONFIG_COPY[k], v)}
     version = "1" if any(k.startswith("extensions.") for k in copied) else "0"
     lines = ["[core]", f"\trepositoryformatversion = {version}", "\tbare = false"]

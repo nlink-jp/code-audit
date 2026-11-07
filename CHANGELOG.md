@@ -34,9 +34,10 @@
   index, refs, exclude data copied; objects linked; a config of its own with
   data keys only) and runs git against that with `-c` overrides and a
   minimal environment, because a repository-defined clean filter runs under
-  `git status` and cannot be undefined from the command line; `run.py exec`
-  runs the command in its own session and kills the whole process group on
-  timeout. 41 tests.
+  `git status` and cannot be undefined from the command line; the copy into
+  the scratch git-dir follows no symlink, takes regular files only and stops
+  at a byte and file budget; `run.py exec` runs the command in its own
+  session and kills the whole process group on timeout. 42 tests.
 
 ### Planned for 0.1.0
 

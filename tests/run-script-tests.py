@@ -299,6 +299,37 @@ class RunPyTests(RunFixture):
         self.assertTrue(out["dirty"])
         self.assertFalse(marker.exists())
 
+    @unittest.skipUnless(shutil.which("git"), "git not available")
+    def test_init_copies_the_git_dir_without_following_links_or_exceeding_a_budget(self) -> None:
+        target = self.tmpdir / "hostile"
+        shutil.copytree(SAMPLE_REPO, target)
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        for cmd in (["git", "init", "-q"], ["git", "add", "."], ["git", "commit", "-q", "-m", "fixture"]):
+            subprocess.run(cmd, cwd=str(target), check=True, capture_output=True, env=env)
+        secret = self.tmpdir / "secret.txt"
+        secret.write_text("do-not-copy\n", encoding="utf-8")
+        os.symlink("/dev/zero", target / ".git" / "refs" / "heads" / "zero")
+        os.symlink(secret, target / ".git" / "packed-refs")
+        (target / ".git" / "refs" / "tags").rmdir()
+        os.symlink(secret, target / ".git" / "refs" / "tags")
+        out = self.ok(run("run.py", "init", "--target", str(target), "--output", str(self.tmpdir / "out-links")))
+        self.assertRegex(out["source_ref"], r"^[0-9a-f]{40}$")
+        # a direct unit check of the budget: a packed-refs larger than the cap makes the target unversioned
+        sys.path.insert(0, str(SCRIPTS))
+        import run as run_module  # noqa: E402
+        big = target / ".git" / "packed-refs"
+        big.unlink()
+        big.write_bytes(b"#\n" * 2048)
+        limits = dict(run_module.COPY_LIMITS)
+        try:
+            run_module.COPY_LIMITS["file_bytes"] = 1024
+            info = run_module.inspect_target(target)
+        finally:
+            run_module.COPY_LIMITS.clear()
+            run_module.COPY_LIMITS.update(limits)
+        self.assertEqual(info["source_ref"], "unversioned")
+        self.assertTrue(info["dirty"])
+
     def test_validate_rejects_forbidden_command_without_reason(self) -> None:
         data = json.loads((FIXTURES / "commands.json").read_text(encoding="utf-8"))
         data["commands"][1]["reason"] = ""
