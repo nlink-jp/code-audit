@@ -118,3 +118,51 @@ A〜E の各修正にテストを付け、未固定 18 件にも pin を足す�
 ## 適用順（リスク順）
 
 C1 → B1 / B2 → A1 / A2 / A3 / A7 → D1–D3 → E → F → G → H → I。
+
+---
+
+# 2 回目（2026-11-08、区切り (4) の修正 `26fdbc4..e0a7f61` に対して）
+
+検証者 2 本（スクリプト: 1 回目の再現を再実行して迂回を探す / SKILL.md・
+クラス・文書の整合）。1 回目の採用項目はすべて「拒否または正しい動作」を
+再現で確認。以下は新たに通ったものだけ。重さは 1 回目より下がった（high は
+文章の 1 件のみ）ので、採用分を区切り (5) で直したあと検証の巡は打ち切り、
+E2E へ進む（[リスク評価は細部で複雑化しない](../../../CLAUDE.md) の方針）。
+
+## S. スクリプト（修正の隣）
+
+| # | 指摘 | 深刻度 | 判定 | 直し方 |
+|---|------|--------|------|--------|
+| S1 | `approve` 後に `set-budget` で上限を上げられ、承認が残る | medium | 採用 | 承認後の `set-budget` は拒む（増額は `approve --budget` だけ） |
+| S2 | `assign` の spent は親の `count` 自己申告。`count` を呼ばなければ予算を素通り | medium | 採用 | `assign` が hunter の呼び出しを自分で加算する（SKILL.md の `count hunter` は再実行時だけ） |
+| S3 | planned が減ると予備枠が縮み、見積より多くのハンターが通る | medium-low | 採用 | `expected_candidates` を planned＋in_progress から出す |
+| S4 | `add` は coverage_ids の存在しか見ず、主張した単位と結び付かないレコードが両 validate 緑で報告に載る | medium | 採用 | 初回 add はキューの候補レコードの coverage_ids と一致を要求、`cross_check` は coverage_ids ⊆ fp を持つ単位を検査 |
+| S5 | `missing` / `symlink` / `too-large` が source_digests に入り同値比較で「不変」。存在しないファイルを根拠にした confirmed が報告に載る（再現済） | medium | 採用 | record と単位の digest は 64 桁 hex 以外を拒む、`digests_unchanged` は hex 以外を含めば False |
+| S6 | `commands.json` の `source` に改行を入れるとログのヘッダを偽装でき、timeout したログが根拠に通る | medium-low | 採用 | コマンド台帳の文字列に改行を禁じ、ヘッダは最初の出現を採る |
+| S7 | 判定済み fingerprint を持つ単位の再割当後、判定を変える置換が再判定できず `complete` は通る | medium-low | 採用 | 再判定は archive 済み attempt の decisions も更新、`set-status complete` は validate と cross_check を通す |
+| S8 | 批評者・偵察・decide を経ない検証者の id は台帳に入らず、役割をまたぐ再利用を捕まえない | low-medium | 採用 | `used_agent_ids` は candidates / notes / replacements の agent も集め、`merge-critic` は批評者 id を記録 |
+| S9 | 直接引用したファイルに大きさの上限が無い（3 GiB sparse を全読） | low | 採用 | 通常ファイルにも bytes 上限 |
+| S10 | stderr が違反値を生で反射する（制御文字が親の端末へ） | low | 採用 | `die` / `fail_if` が制御文字を落とす |
+| S11 | 同じ `--prior` を二度渡すと carried / suppressed が重複 | low | 採用 | realpath で重複排除 |
+| S12 | 同じ fp が carried（後の run の needs_validation）かつ suppressed（前の run の rejected） | low | 採用 | carried になった fp は suppressed から外す |
+| S13 | unversioned 分枝の repo 名が形の縛りを通らない | low | 採用 | 同じ整形を通す |
+| S14 | `commondir` の判定が任意の祖先を認める | low | 採用 | `gitdir == common/worktrees/<name>` を要求 |
+| S15 | 対象内の symlink 経由の出力先は identity では外なので受理され、名前上は対象内 | low | 採用 | 出力先の絶対パスの祖先が名前上対象内なら拒む |
+| S16 | `init --output <既存ファイル>` が traceback | low | 採用 | `is_dir` を見て die |
+| S17 | `decide --agent` が未狩りの単位を合成 check で candidate にする | low | 保留 | 持ち越しの再検証はその単位の証拠だと解する。AGENTS に注記 |
+| S18 | blocked を残したまま `complete` が通る | low | 採用 | complete は blocked も拒む（defer か再割当） |
+| S19 | 未固定 8 件（agent id の checks、起動失敗ログ、cross_check の 2 検査、`approve --budget 0`、dict キーの制御文字、pending だけの complete、attempts の同一所有者） | — | 採用 | pin |
+
+## T. SKILL.md・クラス・文書
+
+| # | 指摘 | 深刻度 | 判定 | 直し方 |
+|---|------|--------|------|--------|
+| T1 | generic.md に origin と一字一句同じ文が 1 つ、近い言い回しが 7 箇所。LICENSE / README の「原文は含まない」と矛盾 | high | 採用 | 同一文を書き換え、近似は語順と構成を変える |
+| T2 | mcp#Server-authored text の「MCP 結果を書き換えて無害化しない」は引用見出しに無い | medium | 採用 | その文の出典（security.md「Making text inert at the ingress …」）を Source に加える |
+| T3 | `run.py count` が「適用成功の後」にあり、捨てた返りを数えない | medium | 採用 | 起動ごと・適用前に count（Phase 5 と同じ） |
+| T4 | 再検証者プロンプトに `<target-data>` と exit_code の明示が無い。批評者に渡す unresolved / uncovered の文も包む対象 | medium | 採用 | Phase 4 と同じ文を Phase 5 と批評者に |
+| T5 | 「Refines generic X」が自由散文で、親が機械的に excluded_classes を作れない。generic の origin レンズが除外で消える | medium | 採用 | `Refines:` 行を `Source:` と同格にし、`classes.py list` に出し、`check-knowledge` で存在検査。SKILL.md の除外条件は「generic の残りの教訓がその surface に当たらないとき」 |
+| T6 | ハンター契約の列挙に `fingerprint` が無い / `prior_blocked` の意味 / `--prior` の順序 / 変更ソースの前回レコードの行き先 / `budget_reserved` の deferred を残して complete / `checks_unavailable` のトリガー / keep の notes / `carried_from` の保持 / agents/ の「受領のまま」 | low | 採用 | 各 1 句。前回レコードは `changed_prior` として報告へ |
+| T7 | cli#Absolute paths の Refines が generic 側の出典と不一致 / Parsers の covered 条件に MIME の救済が無い / G8 の needs_validation と blocked の区別 / Right operation と Forbidden tool の disposition | low | 採用 | 各 1 句 |
+| T8 | AGENTS の 8 KB と出典 2 種の残り、RFP の 8 KB・「どちらか」の残り、「14 点」（F は 13 件＋A3・G7） | low | 採用 | 揃える |
+| T9 | mcp と agent-runtime の Server-authored text が同じ出典（プロキシ兼ランタイムで二重単位） | low | 保留 | 製品型どうしの重複は規則外。Phase 2 |

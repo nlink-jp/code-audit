@@ -125,3 +125,52 @@ each of the 18.
 ## Order of application (by risk)
 
 C1 → B1 / B2 → A1 / A2 / A3 / A7 → D1–D3 → E → F → G → H → I.
+
+---
+
+# Round two (2026-11-08, over the cut-4 fixes `26fdbc4..e0a7f61`)
+
+Two verifiers (scripts: re-run the round-one reproductions and look for
+bypasses next to each fix / SKILL.md, classes and documents). Every adopted
+round-one item was confirmed refused or correct. Below are only the new
+findings. The weight dropped (one high, and it is a text issue), so the
+adopted items are fixed in cut (5) and the verification rounds stop there;
+E2E follows (risk assessment over perfection).
+
+## S. Scripts (next to the fixes)
+
+| # | Finding | Severity | Decision | Fix |
+|---|---------|----------|----------|-----|
+| S1 | `set-budget` after `approve` raises the budget and keeps the approval | medium | adopt | refuse `set-budget` once approved; raising goes through `approve --budget` |
+| S2 | `assign`'s "spent" is the parent's own `count`; without `count` calls the budget is bypassed | medium | adopt | `assign` counts the hunter invocation itself (SKILL.md's `count hunter` only for re-runs) |
+| S3 | The reserve shrinks as planned units decrease, so more hunters pass than estimated | medium-low | adopt | `expected_candidates` from planned + in_progress |
+| S4 | `add` checks only that coverage ids exist; a record not linked to the claiming unit passes both validators and reaches the report | medium | adopt | first add requires the queued candidate's coverage ids; `cross_check` requires coverage ids ⊆ units that hold the fingerprint |
+| S5 | `missing` / `symlink` / `too-large` enter source_digests and compare equal as "unchanged"; a confirmed citing a non-existent file reaches the report (reproduced) | medium | adopt | records and units accept only 64-hex digests; `digests_unchanged` is False with any non-hex value |
+| S6 | A newline in `commands.json` `source` forges the log header; a timed-out log passes as evidence | medium-low | adopt | no newlines in command-ledger strings; the header takes the first occurrence |
+| S7 | After reassigning a unit whose fingerprints were decided, a verdict-changing replacement cannot be re-decided and `complete` still passes | medium-low | adopt | re-decision also updates archived attempts' decisions; `set-status complete` runs validate and cross_check |
+| S8 | Critic, reconnaissance and non-`decide` verifier ids never enter the ledger; reuse across roles is not caught | low-medium | adopt | `used_agent_ids` also collects candidates / notes / replacements; `merge-critic` records the critic id |
+| S9 | No size limit on a directly cited file (a 3 GiB sparse file is read whole) | low | adopt | byte limit for regular files too |
+| S10 | stderr reflects offending values raw (controls to the parent's terminal) | low | adopt | `die` / `fail_if` strip control characters |
+| S11 | The same `--prior` twice duplicates carried / suppressed | low | adopt | deduplicate by realpath |
+| S12 | One fingerprint both carried (later needs_validation) and suppressed (earlier rejected) | low | adopt | a carried fingerprint leaves suppressed |
+| S13 | The unversioned branch's repo name skips the shape rule | low | adopt | same reduction |
+| S14 | The `commondir` predicate accepts any ancestor | low | adopt | require `gitdir == common/worktrees/<name>` |
+| S15 | An output path through a link inside the target is outside by identity, inside by name | low | adopt | refuse when an ancestor of the output's absolute path is inside the target by name |
+| S16 | `init --output <existing file>` raises | low | adopt | check `is_dir` and die |
+| S17 | `decide --agent` turns an unhunted unit into `candidate` with a synthetic check | low | defer | the re-check of a carried record is read as that unit's evidence; noted in AGENTS |
+| S18 | `complete` passes with blocked units left | low | adopt | refuse blocked too (defer or reassign them) |
+| S19 | Eight unpinned checks (agent ids in checks, could-not-start logs, two cross_check rules, `approve --budget 0`, controls in dict keys, complete with only pending candidates, same-owner attempts) | — | adopt | pins |
+
+## T. SKILL.md, classes, documents
+
+| # | Finding | Severity | Decision | Fix |
+|---|---------|----------|----------|-----|
+| T1 | One sentence in generic.md is identical to the origin and seven are close paraphrases; LICENSE / README say no verbatim text is included | high | adopt | rewrite the identical sentence; change order and structure of the close ones |
+| T2 | mcp#Server-authored text's "do not rewrite MCP result data" is in no cited heading | medium | adopt | cite its source (security.md "Making text inert at the ingress …") |
+| T3 | `run.py count` sits after a successful apply, so discarded returns are not counted | medium | adopt | count per launch, before applying (as Phase 5 does) |
+| T4 | The re-verifier prompt lacks `<target-data>` and exit_code; critic inputs (unresolved, uncovered reasons) are target-derived too | medium | adopt | the Phase 4 sentence in Phase 5 and the critic |
+| T5 | "Refines generic X" is free prose; the parent cannot build excluded_classes mechanically, and excluding the generic class drops the origin lens | medium | adopt | a `Refines:` line beside `Source:`, printed by `classes.py list` and checked; exclusion only when the generic class's remaining lessons do not apply to the surface |
+| T6 | `fingerprint` missing from the hunter contract list / `prior_blocked` meaning / `--prior` order / destination of changed-source prior records / complete with budget-deferred units / `checks_unavailable` trigger / notes on keep / `carried_from` kept / agents/ "as received" | low | adopt | one clause each; changed-source prior records reported as `changed_prior` |
+| T7 | cli#Absolute paths refines the wrong generic class / the MIME remedy missing from the Parsers bar / needs_validation vs blocked in G8 / dispositions for Right operation and Forbidden tool | low | adopt | one clause each |
+| T8 | 8 KB and two source kinds left in AGENTS; 8 KB and "either … or" left in the RFP; "fourteen" (F has 13 plus A3 and G7) | low | adopt | align |
+| T9 | mcp and agent-runtime Server-authored text classes share sources (double unit for a proxy that is also a runtime) | low | defer | product-to-product overlap is outside the rule; Phase 2 |
