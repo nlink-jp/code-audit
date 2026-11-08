@@ -1065,8 +1065,9 @@ def inert_prose(text: str) -> str:
         stripped = line.lstrip()
         if stripped[:1] in ("#", "-", "*", "<", ">", "|", "`"):
             line = "\\" + stripped
-        lines.append(break_closing_tag(line))
-    return "\n".join(lines).strip()
+        lines.append(line)
+    # Over the whole text, so a tag split across lines is broken too.
+    return break_closing_tag("\n".join(lines)).strip()
 
 
 def render_markdown(value: object, depth: int, out: list[str]) -> None:
