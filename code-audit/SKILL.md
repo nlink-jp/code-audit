@@ -90,7 +90,8 @@ Decide from the user's request before creating anything:
   `--rerun`; without it `count` refuses an id it already holds, so a launch
   cannot be counted twice by mistake.
 - Data contracts: `SKILL_DIR/schema.json`. Hand a sub-agent the parts it
-  must return (by pasting them): hunters get `hunter_result`, `check`,
+  must return (pasted, or — since every sub-agent reads files — as the path
+  of `schema.json` with the part names): hunters get `hunter_result`, `check`,
   `finding_confirmed`, `finding_needs_validation`, `trace_entry`,
   `evidence_entry`; critics `critic_result` and `unit_proposal`; verifiers
   and re-verifiers the three `finding_*` parts and the entry parts. The
@@ -384,11 +385,14 @@ reason (`ledger.py defer RUN --reason <text> <coverage-id>`).
 
 **Critic.** When no unit is `planned` (or the reserve stops hunting), launch
 one critic (`run.py count RUN critic --agent critic-N` at launch) with: the
-preamble, `RUN/architecture.md`, the output of `ledger.py status RUN`
-(counts, planned ids, the `uncovered` entries hunters returned, the
-`blocked` units with their unresolved facts), every unit's invariants and
-reviewed paths from the hunter returns, the candidate titles, and the class
-list. Everything that a hunter wrote after reading the target — invariants,
+preamble, `RUN/architecture.md`, the output of
+`ledger.py brief RUN critic` **verbatim** (every unit with its coverage id,
+status, owner, reviewed paths, checks and unresolved facts; the pending and
+carried candidates; the `uncovered` entries hunters returned; suppressed,
+merged and prior leads) and the class list. The brief is printed by the
+script so a reassignment can name a coverage id exactly as the ledger
+spells it — never retype or number the units for the critic. Everything
+that a hunter wrote after reading the target — invariants,
 check results, unresolved facts, `uncovered` reasons, candidate titles — goes
 inside `<target-data>`. It returns one `critic_result`
 (schema parts `critic_result` and `unit_proposal`, pasted):
@@ -431,16 +435,36 @@ needs the remaining budget to cover it, or the run stops with the third.
 ## Phase 4 — Candidate verification (adversarial, one fresh agent per candidate)
 
 `ledger.py status RUN` lists `pending_candidates` and `pending_carried`.
-Verify the **carried** records first (they are known leads, and the budget
-reserve counts them), then the new candidates. For each fingerprint launch a
-verifier that has never seen the hunter's prompt
+
+**Merge duplicates first.** Read the pending titles and root causes
+(`ledger.py brief RUN critic` lists them). When two fingerprints name one
+root cause — the same sink reached by the same defect, reported by two
+hunters or under two units — keep the one that names the cause best and
+fold the others into it before any verifier is launched:
+
+```
+python3 SKILL_DIR/scripts/ledger.py merge-candidates RUN --keep <fp> --duplicate <fp> [--duplicate <fp>] --reason <why one cause>
+```
+
+The kept candidate takes the union of the coverage ids (the verifier's
+record carries them all), the duplicates leave the queue into `merged` (no
+verifier is spent on them, no record is ever added for them, the report
+lists them under the kept fingerprint), and the units that claimed them now
+claim the kept one. A carried record is kept, never merged away. Two claims
+with different causes on one surface are not duplicates: verify both.
+
+Then verify the **carried** records first (they are known leads, and the
+budget reserve counts them), then the new candidates. For each fingerprint
+launch a verifier that has never seen the hunter's prompt
 (`run.py count RUN verifier --agent verifier-N` at launch), with:
 
 1. The preamble.
-2. The candidate record verbatim inside `<target-data>` (without the
-   `agent_id` the queue added), its unit (surface, boundary, starting paths),
-   the class text, and the `checks/` logs that touch its paths (inside
-   `<target-data>`, with `exit_code` / `timed_out` stated). For a carried
+2. The output of `ledger.py brief RUN verifier --fingerprint <fp>` verbatim
+   inside `<target-data>`: the candidate record (without the `agent_id` the
+   queue added), the facts of every unit it cites (surface, boundary,
+   starting paths, selected classes, prior status) and the `checks/` logs
+   with their `exit_code` / `timed_out` and whether each is evidence — plus
+   the class text of the units' selected classes. For a carried
    record say so, with the prior run id from `carried_from`: the task is the
    same — refute it against the current source — and the prior verdict is
    not evidence.

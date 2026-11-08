@@ -832,6 +832,53 @@ class LedgerTests(RunFixture):
         result["candidates"][0]["evidence"][0]["file"] = "/etc/passwd"
         self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "abs.json"))), "repository-relative")
 
+    def test_merge_candidates_and_briefs(self) -> None:
+        # E7/E8 (E2E 2026-11-08): duplicates are merged before verification,
+        # and the critic's and verifier's inputs come from the books.
+        self.hunt()
+        u1, u2 = self.unit_ids()
+        keep = "app/files.py:read_user_file:path-traversal"
+        dup = "app/files.py:read_user_file:symlink-escape"
+        self.refused(run("ledger.py", "merge-candidates", str(self.run_dir), "--keep", keep, "--duplicate", keep, "--reason", "same"), "names the kept fingerprint")
+        self.refused(run("ledger.py", "merge-candidates", str(self.run_dir), "--keep", "nope:x:y", "--duplicate", dup, "--reason", "same"), "--keep is not a pending candidate")
+        self.refused(run("ledger.py", "merge-candidates", str(self.run_dir), "--keep", keep, "--duplicate", dup, "--reason", "   "), "--reason needs text")
+        out = self.ok(run("ledger.py", "merge-candidates", str(self.run_dir), "--keep", keep, "--duplicate", dup, "--reason", "both describe the unchecked path join in read_user_file"))
+        self.assertEqual((out["kept"], out["merged"], out["pending"]), (keep, [dup], 2))
+        status = self.ok(run("ledger.py", "status", str(self.run_dir)))
+        self.assertEqual(status["merged"], [{"fingerprint": dup, "into": keep}])
+        self.assertNotIn(dup, status["pending_candidates"])
+        unit = next(u for u in self.ledger() if u["coverage_id"] == u1)
+        self.assertNotIn(dup, unit["result_fingerprints"])
+        self.assertIn(keep, unit["result_fingerprints"])
+        self.ok(run("ledger.py", "validate", str(self.run_dir)))
+        # no record ever enters for the merged duplicate
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(1), "dup.json"))), "not a pending candidate")
+        # the critic's brief carries the coverage ids verbatim and the merge
+        brief = self.ok(run("ledger.py", "brief", str(self.run_dir), "critic"))
+        self.assertEqual({u["coverage_id"] for u in brief["units"]}, {u1, u2})
+        self.assertEqual([x["fingerprint"] for x in brief["pending_candidates"]], [keep, "app/files.py:list_user_files:enumeration"])
+        self.assertEqual(brief["merged"][0]["into"], keep)
+        self.assertIn("invariant", brief["units"][0]["checks"][0])
+        self.refused(run("ledger.py", "brief", str(self.run_dir), "critic", "--fingerprint", keep), "takes no --fingerprint")
+        # the verifier's brief is the candidate without the queue's agent id, its units and the logs
+        self.refused(run("ledger.py", "brief", str(self.run_dir), "verifier"), "needs --fingerprint")
+        self.refused(run("ledger.py", "brief", str(self.run_dir), "verifier", "--fingerprint", dup), "not a pending candidate")
+        vb = self.ok(run("ledger.py", "brief", str(self.run_dir), "verifier", "--fingerprint", keep))
+        self.assertNotIn("agent_id", vb["candidate"])
+        self.assertEqual(vb["candidate"]["fingerprint"], keep)
+        self.assertEqual([u["coverage_id"] for u in vb["units"]], [u1])
+        log = next(x for x in vb["check_logs"] if x["command_id"] == "unit-tests")
+        self.assertEqual((log["check_log"], log["timed_out"], log["is_evidence"]), ("checks/unit-tests.log", "False", True))
+        # the kept record is added and decided as usual, and the report lists the merge
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(0), "keep.json")), "--target", str(self.target)))
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", keep, "--verdict", "confirmed"))
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(2), "enum.json")), "--target", str(self.target)))
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", "app/files.py:list_user_files:enumeration", "--verdict", "needs_validation"))
+        self.ok(run("compile.py", str(self.run_dir)))
+        report = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
+        self.assertIn("Candidates merged as duplicates", report)
+        self.assertIn(f"`{dup}` → `{keep}`", report)
+
     def test_record_accepts_extra_reviewed_paths_and_stores_the_union(self) -> None:
         # E3 (E2E 2026-11-08): a path read without a check is not coverage, so
         # the extra path is dropped, not refused.

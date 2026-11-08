@@ -51,6 +51,7 @@ L = {
         "notes": "覚え書き", "hardening": "強化の提案（所見ではない）", "out_of_scope": "範囲外の観察",
         "coverage": "網羅の要約", "th_status": "状態", "th_count": "件数", "deferred_units": "先送り・範囲外の単位と理由", "uncovered": "次の波に回すべき未割当の面", "unverified": "検証に至らなかった候補（判定なし・深刻度なし）", "undecided": "台帳の判定が無いレコード（所見として報告しない）", "unlinked_prior": "今回の単位に結び付かない前回のレコード（判定なし）", "changed_prior": "引用元が変わったため持ち越さず再度狩った前回のレコード（今回の判定は上の表）",
         "rejected": "反証された候補", "rejected_line": "反証された候補は所見ではありません。次回の再報告を抑えるために fingerprint だけを記します: {fps}",
+        "merged": "同根として統合した候補", "merged_line": "次の候補は別の fingerprint と根本原因を共有すると判断し、統合先で 1 回だけ検証しました（統合先の判定が上の表にあります）。",
         "carried": "持ち越し", "suppressed": "前回 rejected のまま抑止した主張",
         "nv_title": "code-audit 検証待ちの手がかり",
     },
@@ -80,6 +81,7 @@ L = {
         "notes": "Notes", "hardening": "Hardening notes (not findings)", "out_of_scope": "Out-of-scope observations",
         "coverage": "Coverage summary", "th_status": "Status", "th_count": "Count", "deferred_units": "Deferred and out-of-scope units with reasons", "uncovered": "Unassigned surfaces for a later wave", "unverified": "Candidates not verified (no verdict, no severity)", "undecided": "Records without a ledger decision (not reported as findings)", "unlinked_prior": "Prior records that no current unit covers (no verdict)", "changed_prior": "Prior records whose cited sources changed (re-hunted, not carried; this run's verdicts are above)",
         "rejected": "Rejected candidates", "rejected_line": "Rejected candidates are not findings. Only their fingerprints are listed so the next run does not repeat the claim: {fps}",
+        "merged": "Candidates merged as duplicates", "merged_line": "These candidates were judged to share a root cause with another fingerprint and were verified once under it (the kept fingerprint's verdict is in the tables above).",
         "carried": "carried", "suppressed": "claims suppressed as rejected in a prior run",
         "nv_title": "code-audit leads awaiting validation",
     },
@@ -311,6 +313,14 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
         out.append(f"## {t['rejected']}")
         out.append("")
         out.append(t["rejected_line"].format(fps=", ".join(f"`{code(r['fingerprint'])}`" for r in rejected)))
+        out.append("")
+    if candidates.get("merged"):
+        out.append(f"## {t['merged']}")
+        out.append("")
+        out.append(t["merged_line"])
+        out.append("")
+        for m in candidates["merged"]:
+            out.append(f"- `{code(m['fingerprint'])}` → `{code(m['into'])}`: {plain(m.get('reason', ''))}")
         out.append("")
     return "\n".join(out).rstrip("\n") + "\n"
 

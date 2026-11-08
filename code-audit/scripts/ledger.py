@@ -867,6 +867,143 @@ def cmd_merge_critic(args: argparse.Namespace) -> None:
     })
 
 
+def cmd_merge_candidates(args: argparse.Namespace) -> None:
+    """Two hunters often name one root cause under two fingerprints. The
+    parent reads the pending titles and root causes and merges the duplicates
+    into the fingerprint it keeps, before any verifier is launched: the kept
+    candidate takes the union of the coverage ids, the duplicates leave the
+    queue into `merged` (so no verifier is spent on them and no record is
+    ever added for them), and every unit that claimed a duplicate now claims
+    the kept fingerprint. Merging is the parent's judgement; the books only
+    make it consistent and visible in the report."""
+    run_dir = Path(args.run_dir)
+    c.load_metadata(run_dir)
+    units = load_ledger(run_dir)
+    candidates = c.load_candidates(run_dir)
+    ids = by_id(units)
+    keep, dups, reason = args.keep, list(args.duplicate), args.reason
+    errors: list[str] = []
+    if not reason.strip():
+        errors.append("--reason needs text: why the claims share one root cause")
+    errors += c.forbidden_char_errors({"reason": reason}, "merge")
+    queued = {r["fingerprint"]: (key, r) for key in ("candidates", "carried") for r in candidates[key]}
+    if keep not in queued:
+        errors.append(f"{keep}: --keep is not a pending candidate of this run")
+    if len(set(dups)) != len(dups):
+        errors.append("a duplicate is named twice")
+    for fp in dups:
+        if fp == keep:
+            errors.append(f"{fp}: --duplicate names the kept fingerprint")
+        elif fp not in queued:
+            errors.append(f"{fp}: --duplicate is not a pending candidate of this run")
+        elif queued[fp][0] == "carried":
+            errors.append(f"{fp}: a carried record is a prior run's claim; keep it and merge the new candidate into it")
+    c.fail_if(errors)
+    kept = queued[keep][1]
+    cov = set(kept.get("coverage_ids", []))
+    for fp in dups:
+        rec = queued[fp][1]
+        cov |= set(rec.get("coverage_ids", []))
+        candidates["candidates"] = [r for r in candidates["candidates"] if r["fingerprint"] != fp]
+        candidates["merged"].append({"fingerprint": fp, "title": rec.get("title", ""), "into": keep, "reason": reason, "coverage_ids": list(rec.get("coverage_ids", [])), "agent_id": rec.get("agent_id")})
+        for u in units:
+            if fp in u["result_fingerprints"]:
+                u["result_fingerprints"] = [x for x in u["result_fingerprints"] if x != fp]
+                if keep not in u["result_fingerprints"]:
+                    u["result_fingerprints"].append(keep)
+                u.setdefault("notes", []).append(f"candidate {fp} merged into {keep}: {reason}")
+    kept["coverage_ids"] = sorted(cov)
+    for cid in kept["coverage_ids"]:
+        u = ids.get(cid)
+        if u is not None and keep not in u["result_fingerprints"]:
+            u["result_fingerprints"].append(keep)
+    save_ledger(run_dir, units, candidates)
+    c.emit({
+        "kept": keep,
+        "coverage_ids": kept["coverage_ids"],
+        "merged": dups,
+        "pending": len(candidates["candidates"]) + len(candidates["carried"]),
+    })
+
+
+def unit_brief(u: dict) -> dict:
+    """The facts of a unit a critic or verifier needs, copied from the ledger
+    so the parent never paraphrases a coverage id or an invariant."""
+    return {
+        "coverage_id": u["coverage_id"],
+        "status": u["status"],
+        "agent_id": u["agent_id"],
+        "surface": u["surface"],
+        "boundary": u["boundary"],
+        "subsystem": u["subsystem"],
+        "attack_class": u["attack_class"],
+        "starting_paths": u["starting_paths"],
+        "selected_classes": u["selected_classes"],
+        "excluded_classes": u["excluded_classes"],
+        "prior_status": u["prior_status"],
+        "reviewed_paths": u["reviewed_paths"],
+        "checks": [{"invariant": chk["invariant"], "method": chk["method"], "result": chk["result"], "check_log": chk["check_log"]} for chk in u["checks"]],
+        "result_fingerprints": u["result_fingerprints"],
+        "unresolved": u["unresolved"],
+    }
+
+
+def check_logs_brief(run_dir: Path) -> list[dict]:
+    """Every checks/ log with the header facts a reader must weigh: a log of a
+    command that did not run is not evidence."""
+    out = []
+    checks = run_dir / c.CHECKS_DIR
+    for p in sorted(checks.glob("*.log")) if checks.is_dir() else []:
+        header: dict[str, str] = {}
+        with p.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if line.startswith("--- stdout ---"):
+                    break
+                if ": " in line:
+                    k, v = line.rstrip("\n").split(": ", 1)
+                    header[k] = v
+        out.append({"check_log": f"{c.CHECKS_DIR}/{p.name}", "command_id": header.get("command_id"), "exit_code": header.get("exit_code"), "timed_out": header.get("timed_out"), "is_evidence": header.get("timed_out") == "False" and header.get("exit_code") not in (None, "None")})
+    return out
+
+
+def cmd_brief(args: argparse.Namespace) -> None:
+    """Print a sub-agent's input from the books. The critic's brief is the
+    whole ledger as it stands (coverage ids verbatim, so a reassignment can
+    name one); the verifier's brief is one pending candidate without the
+    queue's agent id, the facts of the units it cites, and the check logs.
+    The parent wraps the output in <target-data> and adds the class text."""
+    run_dir = Path(args.run_dir)
+    meta = c.load_metadata(run_dir)
+    units = load_ledger(run_dir)
+    candidates = c.load_candidates(run_dir)
+    if args.role == "critic":
+        if args.fingerprint:
+            c.die("the critic's brief takes no --fingerprint")
+        c.emit({
+            "profile": meta["profile"],
+            "units": [unit_brief(u) for u in units],
+            "pending_candidates": [{"fingerprint": r["fingerprint"], "title": r.get("title", ""), "proposed_verdict": r.get("proposed_verdict"), "coverage_ids": r.get("coverage_ids", [])} for r in candidates["candidates"]],
+            "carried": [{"fingerprint": r["fingerprint"], "title": r.get("title", ""), "verdict": r.get("verdict"), "carried_from": r.get("carried_from"), "coverage_ids": r.get("coverage_ids", [])} for r in candidates["carried"]],
+            "uncovered": candidates["uncovered"],
+            "suppressed": [r["fingerprint"] for r in candidates["suppressed"]],
+            "merged": candidates["merged"],
+            "prior_leads": candidates["prior_leads"],
+        })
+        return
+    if not args.fingerprint:
+        c.die("the verifier's brief needs --fingerprint")
+    rec = next((r for key in ("candidates", "carried") for r in candidates[key] if r["fingerprint"] == args.fingerprint), None)
+    if rec is None:
+        c.die(f"{args.fingerprint}: not a pending candidate of this run")
+    candidate = {k: v for k, v in rec.items() if k != "agent_id"}
+    ids = by_id(units)
+    c.emit({
+        "candidate": candidate,
+        "units": [unit_brief(ids[cid]) for cid in candidate.get("coverage_ids", []) if cid in ids],
+        "check_logs": check_logs_brief(run_dir),
+    })
+
+
 def cmd_decide(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     fp, verdict = args.fingerprint, args.verdict
@@ -1100,6 +1237,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         "blocked": [{"coverage_id": u["coverage_id"], "unresolved": u["unresolved"]} for u in units if u["status"] == "blocked"],
         "suppressed": [r["fingerprint"] for r in candidates["suppressed"]],
         "unlinked_prior": [r["fingerprint"] for r in candidates["unlinked_prior"]],
+        "merged": [{"fingerprint": m["fingerprint"], "into": m["into"]} for m in candidates["merged"]],
     })
 
 
@@ -1133,6 +1271,19 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("result")
     p.add_argument("--target", required=True)
     p.set_defaults(func=cmd_merge_critic)
+
+    p = sub.add_parser("merge-candidates")
+    p.add_argument("run_dir")
+    p.add_argument("--keep", required=True, help="the pending fingerprint that stays in the queue")
+    p.add_argument("--duplicate", action="append", required=True, help="a pending fingerprint sharing its root cause (repeatable)")
+    p.add_argument("--reason", required=True)
+    p.set_defaults(func=cmd_merge_candidates)
+
+    p = sub.add_parser("brief")
+    p.add_argument("run_dir")
+    p.add_argument("role", choices=["critic", "verifier"])
+    p.add_argument("--fingerprint", help="the pending candidate a verifier's brief is about")
+    p.set_defaults(func=cmd_brief)
 
     p = sub.add_parser("decide")
     p.add_argument("run_dir")

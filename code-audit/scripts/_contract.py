@@ -429,7 +429,7 @@ def load_metadata(run_dir: Path) -> dict:
     return data  # type: ignore[return-value]
 
 
-CANDIDATE_KEYS = ("candidates", "carried", "decided", "suppressed", "uncovered", "resolved_prior_leads", "unlinked_prior", "changed_prior", "agents_seen")
+CANDIDATE_KEYS = ("candidates", "carried", "decided", "suppressed", "uncovered", "resolved_prior_leads", "unlinked_prior", "changed_prior", "merged", "prior_leads", "agents_seen")
 
 
 def load_candidates(run_dir: Path) -> dict:
