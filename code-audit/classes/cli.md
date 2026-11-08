@@ -35,8 +35,7 @@ default location. A present key with an empty, NaN or sentinel value is a
 given value, not "unset". Exceptions the records allow: machine-generated
 data is decoded leniently on purpose, and unknown keys may be allowed in a
 file shared with other readers. Covered when hand-written config is strict,
-every loader fails loud, and present values are taken as given. Refines
-generic `Business logic`.
+every loader fails loud, and present values are taken as given.
 
 ## Cleanup from a plan instead of a ledger
 Source: security.md#Clean up from what was created, not from what was planned — only an exclusive create's success enters the ledger, and only the ledger deletes
@@ -76,8 +75,7 @@ Fetched descriptions, file names, headers and JSON output reach a terminal
 with escape sequences and C1 controls intact, including through `--json`.
 Covered when one function makes the whole output inert at the terminal
 egress and downstream transforms are held to what they write themselves.
-Output to a pipe or a file may stay verbatim; do not report it. Refines
-generic `Injection`.
+Output to a pipe or a file may stay verbatim; do not report it.
 
 ## Credential follows a redirect
 Source: security.md#A credential may follow a redirect only within the domain the request started in
@@ -96,8 +94,7 @@ Refines: classes/generic.md#Cryptography and secrets
 
 Debug flags that write request bodies, transcripts or raw responses: are
 the directory and file modes derived from the most protected content
-inside, and is the switch documented? Covered when both hold. Refines
-generic `Cryptography and secrets`.
+inside, and is the switch documented? Covered when both hold.
 
 ## Checks that fail open
 Source: shell-scripting.md#Tell "the input could not be fetched" apart from an empty answer, testing.md#A release gate that skips is a gate that passes, release-engineering.md#A fail-open step plus a verifier that only displays = a defective release with green checks

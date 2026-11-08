@@ -97,10 +97,27 @@
   the one unsourced sentence cites its heading, bars and dispositions
   settled. SKILL.md counts every launch when it happens and wraps every
   target-derived input. 89 tests.
+- First end-to-end run (2026-11-08, `webhook-relay`, quick: 29 launches,
+  about 2.6M tokens, 5 confirmed / 2 needs_validation / 7 rejected; record
+  in `docs/{ja,en}/reviews/2026-11-08-e2e-smoke-webhook-relay*.md`) and cut
+  (6), its lessons: `run.py count --agent` refuses a counted id without
+  `--rerun`; `record` keeps the union of the checks' paths and refuses only a
+  missing one; a fingerprint may lead with a dot; the estimate groups units
+  per hunter, expects one candidate per two units and budgets re-asks;
+  `run.py exec` redirects `GOCACHE`, `XDG_CACHE_HOME` and
+  `PYTHONPYCACHEPREFIX` under `RUN/cache/` with `GOPROXY=off`,
+  `GOFLAGS=-mod=readonly`, `GOTOOLCHAIN=local`; `ledger.py merge-candidates`
+  folds duplicate claims before verification and the report lists them;
+  `ledger.py brief critic|verifier` prints the sub-agent's input from the
+  books; `lead` notes are carried to the next run's critic by `seed --prior`;
+  the coverage line counts decided candidate units; SKILL.md states the
+  one-sink trace shape, repository-relative reconnaissance paths, the merge
+  step, the briefs and schema parts by reference; the two leftover "Refines
+  generic" sentences in `cli.md` removed. 92 tests.
 
 ### Planned for 0.1.0
 
-Phase 3: a second independent verification pass over the cut-4 fixes;
-end-to-end runs on two organization repositories (one MCP server, one CLI)
-with invocations, tokens and cost recorded against the estimate; release per
-the organization checklist.
+Phase 3: the remaining end-to-end runs (`webhook-relay` standard, `web-fetch`
+quick and standard; estimated 40–45, 35–40 and 60–70 launches) with
+invocations, tokens and cost recorded against the estimate; release per the
+organization checklist.

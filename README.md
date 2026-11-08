@@ -98,6 +98,14 @@ the budget reserved for critics and verifiers; a record enters the findings
 file only for a claim the ledger holds, and both validators cross-check the
 two; a log of a test that never ran is not evidence; places are compared by
 identity, not by name; every value the report prints is made inert first.
+From the first end-to-end run (`docs/en/reviews/2026-11-08-e2e-smoke-webhook-relay.md`):
+a counted launch is counted again only as a declared re-ask (`run.py count
+--rerun`); duplicate claims are folded before any verifier is spent
+(`ledger.py merge-candidates`); the critic's and the verifier's inputs are
+printed from the books (`ledger.py brief`) so no coverage id is retyped;
+toolchain caches land under the run and downloads are off (`run.py exec`);
+the estimate counts hunters by grouping and budgets re-asks; `lead` notes
+reach the next run's critic through `seed --prior`.
 Residual risks are in the RFP: the target's own tests run unsandboxed as
 your user, and whether a sub-agent really has no shell depends on the agent
 type the runtime offers.

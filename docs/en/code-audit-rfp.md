@@ -494,3 +494,13 @@ independent pass), it sits beside compliance-review and incident-review.
   rounds stop here: round two found no high defect in the scripts and the
   weight dropped (risk assessment over perfection). Next: E2E on real
   repositories.
+- **2026-11-08 E2E smoke (webhook-relay / quick) and cut (6)**: one full
+  pass in 29 launches and about 2.6M tokens (confirmed 5 / needs_validation 2
+  / rejected 7); record in `docs/en/reviews/2026-11-08-e2e-smoke-webhook-relay.md`.
+  Lessons E1–E12 adopted in cut (6): a second count only as a declared
+  `--rerun`, duplicates folded by `merge-candidates` before verification, the
+  critic's and verifier's inputs printed by `brief` from the books, the
+  estimate grouping units and budgeting re-asks, `exec` redirecting toolchain
+  caches under the run with downloads off, `lead` notes carried to the next
+  run. The estimate's constants (3 units per hunter, 0.5 candidates per unit,
+  20% re-asks) come from one pass and are revisited over the remaining three.

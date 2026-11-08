@@ -433,3 +433,11 @@ compliance-review / incident-review と並ぶ。
   T1〜T8 を適用（保留: S17 持ち越し再検証の candidate 化、T9 製品型どうしの
   重複）。検証の巡はここで打ち切る: 2 回目でスクリプトの high は無く、重さが
   下がったため（細部の詰めで複雑化しない方針）。次は実リポジトリでの E2E。
+- **2026-11-08 E2E スモーク（webhook-relay / quick）と区切り (6)**: 29 回・約
+  2.6M トークンで完走（confirmed 5 / needs_validation 2 / rejected 7）。記録は
+  `docs/ja/reviews/2026-11-08-e2e-smoke-webhook-relay.ja.md`。学び E1〜E12 を
+  区切り (6) で採用: 再記帳は `--rerun` 宣言つきだけ、同根候補は検証前に
+  `merge-candidates`、批評者・検証者の入力は `brief` が台帳から印字、見積もりは
+  束ねと再依頼を数える、exec はツールチェーンのキャッシュを run 配下に置き
+  ダウンロードを切る、`lead` ノートは次走へ。見積もりの定数（3 単位/ハンター・
+  候補 0.5/単位・再依頼 20%）は 1 走の実測であり、残り 3 走で見直す。

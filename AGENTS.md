@@ -37,8 +37,8 @@ Bundled scripts (stdlib-only Python 3.9+; `--help` on each):
 
 | Script | Subcommands | Owns |
 |--------|-------------|------|
-| `run.py` | `init`, `approve [--budget N]`, `nonce`, `set-budget`, `count [--agent]`, `set-status`, `validate`, `exec` | `run-metadata.json`, `checks/<id>.log` |
-| `ledger.py` | `seed [--prior]`, `assign`, `record`, `merge-critic`, `decide`, `defer`, `abandon`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json` (and appends hunter notes to `notes.json`) |
+| `run.py` | `init`, `approve [--budget N]`, `nonce`, `set-budget`, `count [--agent [--rerun]]`, `set-status`, `validate`, `exec` | `run-metadata.json`, `checks/<id>.log`, `cache/` (toolchain caches `exec` redirects) |
+| `ledger.py` | `seed [--prior]`, `assign`, `record`, `merge-critic`, `merge-candidates`, `brief critic|verifier`, `decide`, `defer`, `abandon`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json` (and appends hunter notes to `notes.json`) |
 | `findings.py` | `validate`, `add [--replace --by <agent> [--confirmed-by <agent>]]`, `digest`, `note` | `findings.json`, `replacements.json`, `notes.json` (`digest` writes back the record file it is given) |
 | `compile.py` | (run dir) | `REPORT.ja.md`, `REPORT.md`, `NEEDS-VALIDATION.ja.md`, `NEEDS-VALIDATION.md` |
 | `classes.py` | `list`, `size`, `check-knowledge [--adr] [--origin]` | nothing; checks `classes/*.md` |
@@ -88,12 +88,13 @@ code-audit/
 |------|-----------|---------|
 | `run-metadata.json` | `run.py` | run_id, repo name (git remote, never a path), source ref + dirty, profile, budget, invocation counters, run_status + reason |
 | `commands.json` | the parent, during reconnaissance | the target's test/check commands, each allowed or forbidden with a reason, `env_allow`, `timeout_sec`, `writes`, `source` |
-| `checks/<id>.log` | `run.py exec` | command, allowed variable names, exit code, duration, stdout/stderr |
+| `checks/<id>.log` | `run.py exec` | command, allowed variable names, the cache variables set, exit code, duration, stdout/stderr |
+| `cache/` | `run.py exec` | `GOCACHE`, `XDG_CACHE_HOME`, `PYTHONPYCACHEPREFIX` of the commands it runs (`GOPROXY=off`, `GOFLAGS=-mod=readonly`, `GOTOOLCHAIN=local`: no downloads) |
 | `coverage-ledger.json` | `ledger.py` | units: canonical refs → `coverage_id`, starting paths + `source_digests`, prior_status, state, owner, checks, fingerprints, decisions, archived `attempts` |
-| `candidates.json` | `ledger.py` | `candidates` (hunter-proposed, pending), `carried` (from prior runs), `decided`, `suppressed` (prior rejected, same source), `uncovered`, `resolved_prior_leads` |
+| `candidates.json` | `ledger.py` | `candidates` (hunter-proposed, pending), `carried` (from prior runs), `decided`, `suppressed` (prior rejected, same source), `uncovered`, `resolved_prior_leads`, `merged` (duplicates folded into a kept fingerprint), `prior_leads` (`lead` notes of prior runs, for the critic) |
 | `findings.json` | `findings.py` | decided records, sorted by fingerprint |
 | `replacements.json` | `findings.py add --replace` | every re-verification replacement: previous and new verdict, the strengthened fields, who wrote it, who confirmed it |
-| `notes.json` | `ledger.py record` / `findings.py note` | hardening and out-of-scope notes with the author's agent id |
+| `notes.json` | `ledger.py record` / `findings.py note` | hardening, out-of-scope and lead notes with the author's agent id |
 | `architecture.md`, `proposals.json`, `agents/<id>.json` | the parent | reconnaissance summary, the unit proposals given to `seed`, the raw return of every sub-agent |
 | `REPORT*.md`, `NEEDS-VALIDATION*.md` | `compile.py` | derived reports |
 
@@ -121,8 +122,18 @@ code-audit/
   attempt and needs a fresh owner.
 - **A hunter result is applied whole or not at all**: every unit assigned to
   the agent appears exactly once, every claimed fingerprint has a candidate
-  record that passes the findings bar, and unit `reviewed_paths` equal the
-  union of its checks' paths.
+  record that passes the findings bar, and unit `reviewed_paths` include
+  every path a check names (extra paths are dropped; the union is stored).
+- **E2E-derived controls (cut 6)**: `run.py count --agent` refuses an id it
+  already holds unless `--rerun` says this is the same agent asked again;
+  `ledger.py merge-candidates --keep --duplicate... --reason` folds
+  duplicate claims before verification (the kept candidate takes the union
+  of coverage ids, duplicates go to `merged` and never get a record);
+  `ledger.py brief critic|verifier` prints the sub-agent's input from the
+  books; `estimate_numbers` groups `UNITS_PER_HUNTER` units per hunter,
+  expects `CANDIDATES_PER_UNIT` and budgets `RERUN_RATE` re-asks (measured
+  on the first E2E); `run.py exec` redirects toolchain caches under
+  `RUN/cache/` and forbids downloads; fingerprints may lead with a dot.
 - **`decide` requires the record first** (`findings.py add`), then links the
   fingerprint to units; a carried record on a still-planned unit needs
   `--agent` (the verifier becomes the owner).
