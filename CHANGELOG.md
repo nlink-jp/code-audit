@@ -117,7 +117,9 @@
 
 ### Planned for 0.1.0
 
-Phase 3: the remaining end-to-end runs (`webhook-relay` standard, `web-fetch`
-quick and standard; estimated 40–45, 35–40 and 60–70 launches) with
-invocations, tokens and cost recorded against the estimate; release per the
-organization checklist.
+Phase 3: the `webhook-relay` standard run is done (2026-11-08: 42 launches,
+about 3.9M tokens, 0 confirmed / 2 needs_validation / 7 rejected; record in
+`docs/{ja,en}/reviews/2026-11-08-e2e-standard-webhook-relay*.md`, lessons
+E13–E20 pending as cut 7); the `web-fetch` quick and standard runs remain
+(estimated 45–50 and about 75 launches); release per the organization
+checklist.
