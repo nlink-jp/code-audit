@@ -148,7 +148,8 @@ def resolve_git_dir(target: Path) -> tuple[Path, Path] | None:
     cd = gitdir / "commondir"
     if cd.is_file():
         common = (gitdir / cd.read_text(encoding="utf-8", errors="replace").strip()).resolve()
-        if not c.is_inside(common, target) and not c.is_inside(gitdir, common):
+        # A linked worktree's git-dir is exactly <common>/worktrees/<name>.
+        if gitdir.parent.name != "worktrees" or not c.same_place(gitdir.parent.parent, common):
             return None
     return gitdir, common
 
@@ -279,14 +280,14 @@ def inspect_target(target: Path) -> dict:
     git config reach git. A target without a usable .git is 'unversioned'."""
     resolved = resolve_git_dir(target)
     if resolved is None:
-        return {"repo": target.resolve().name, "source_ref": "unversioned", "dirty": True}
+        return {"repo": repo_name_from({}, target), "source_ref": "unversioned", "dirty": True}
     gitdir, common = resolved
     with tempfile.TemporaryDirectory(prefix="code-audit-git-") as tmp:
         scratch = Path(tmp) / "gitdir"
         scratch.mkdir()
         original = sanitized_git_dir(gitdir, common, scratch)
         if original is None:
-            return {"repo": target.resolve().name, "source_ref": "unversioned", "dirty": True}
+            return {"repo": repo_name_from({}, target), "source_ref": "unversioned", "dirty": True}
         name = repo_name_from(original, target)
         source_ref = git(scratch, target, "rev-parse", "HEAD")
         porcelain = git(scratch, target, "status", "--porcelain", "--no-renames", "--ignore-submodules=all")
@@ -311,15 +312,28 @@ def cmd_init(args: argparse.Namespace) -> None:
     run_dir = Path(args.output) if args.output else next_run_dir(Path.home() / "code-audit-runs" / name.replace("/", "__"))
     if c.is_inside(run_dir, target):
         c.die("output directory is inside the target; choose a directory outside the repository under audit")
+    abs_out = os.path.abspath(run_dir)
+    for t in {os.path.abspath(target), os.path.realpath(target)}:
+        if abs_out == t or abs_out.startswith(t + os.sep):
+            # Outside by identity (a link leads out) but inside by name: the
+            # target's own files can still reach it through that name.
+            c.die("output directory is inside the target by name (through a link); choose a directory outside the repository under audit")
     if c.is_inside(target, run_dir):
         c.die("the target is inside the output directory; choose a separate directory")
+    if run_dir.exists() and not run_dir.is_dir():
+        c.die(f"output path exists and is not a directory: {args.output}")
     if run_dir.exists() and any(run_dir.iterdir()):
         c.die(f"output directory exists and is not empty: {args.output}")
     priors: list[str] = []
+    seen_priors: set[str] = set()
     for p in args.prior or []:
         pp = Path(p)
         if not (pp / c.METADATA_FILE).is_file():
             c.die(f"prior run has no {c.METADATA_FILE}: {p}")
+        real = os.path.realpath(pp)
+        if real in seen_priors:
+            continue
+        seen_priors.add(real)
         priors.append(pp.resolve().name)
     source_ref, dirty = info["source_ref"], info["dirty"]
     metadata = {
@@ -353,6 +367,8 @@ def cmd_set_budget(args: argparse.Namespace) -> None:
     meta = c.load_metadata(run_dir)
     if args.n < 1:
         c.die("budget must be a positive integer")
+    if meta.get("approved"):
+        c.die("the run is approved; the budget changes only through run.py approve --budget (a human decision)")
     meta["budget"] = args.n
     c.write_json(run_dir / c.METADATA_FILE, meta)
     c.emit({"budget": meta["budget"]})
@@ -394,6 +410,12 @@ def cmd_count(args: argparse.Namespace) -> None:
     meta = c.load_metadata(run_dir)
     if args.n < 1:
         c.die("--n must be a positive integer; invocations only ever accumulate")
+    if args.agent:
+        if not c.is_agent_id(args.agent):
+            c.die(f"'{args.agent}' is not a canonical agent id")
+        agents = meta.setdefault("agents", [])
+        if args.agent not in agents:
+            agents.append(args.agent)
     meta["invocations"][args.role] += args.n
     total = sum(meta["invocations"].values())
     over = meta["budget"] is not None and total > meta["budget"]
@@ -410,14 +432,19 @@ def cmd_set_status(args: argparse.Namespace) -> None:
     if args.status == "incomplete" and not args.reason:
         c.die("incomplete needs --reason")
     if args.status == "complete" and (run_dir / c.LEDGER_FILE).exists():
-        # A complete run has nothing left undecided; otherwise it is incomplete
-        # with a reason, and the report says so.
-        units = c.read_json(run_dir / c.LEDGER_FILE)
+        # A complete run has nothing left open and its books agree; otherwise
+        # it is incomplete with a reason, and the report says so.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import ledger  # noqa: E402
+        units = ledger.load_ledger(run_dir)
         cands = c.load_candidates(run_dir)
-        open_units = [u["coverage_id"] for u in units if isinstance(u, dict) and u.get("status") in ("planned", "in_progress")]
+        open_units = [u["coverage_id"] for u in units if u.get("status") in ("planned", "in_progress", "blocked")]
+        budget_deferred = [u["coverage_id"] for u in units if u.get("status") == "deferred" and any(str(x).startswith("budget_reserved") for x in u.get("unresolved", []))]
         pending = [r["fingerprint"] for key in ("candidates", "carried") for r in cands[key]]
-        if open_units or pending:
-            c.die(f"the run is not complete: {len(open_units)} planned/in_progress unit(s), {len(pending)} undecided candidate(s); defer or decide them, or set incomplete with a reason")
+        if open_units or pending or budget_deferred:
+            c.die(f"the run is not complete: {len(open_units)} planned/in_progress/blocked unit(s), {len(budget_deferred)} unit(s) deferred for budget, {len(pending)} undecided candidate(s); defer, reassign or decide them, or set incomplete with a reason")
+        problems = ledger.validate_ledger(run_dir, units, cands) + ledger.cross_check(c.load_findings(run_dir), units, cands)
+        c.fail_if(problems)
     meta["run_status"] = args.status
     meta["incomplete_reason"] = args.reason if args.status == "incomplete" else None
     c.write_json(run_dir / c.METADATA_FILE, meta)
@@ -455,6 +482,12 @@ def validate_commands(data: object) -> list[str]:
             errors.append(f"{base}.reason: a forbidden command needs a reason")
         if entry["cwd"] != "." and not c.is_repo_relative(entry["cwd"]):
             errors.append(f"{base}.cwd: must be '.' or a repository-relative path")
+        for key in ("id", "cwd", "reason", "source"):
+            if any(ch in entry[key] for ch in "\r\n"):
+                errors.append(f"{base}.{key}: no line breaks (the value is written into the check log's header)")
+        for j, a in enumerate(entry["argv"]):
+            if any(ch in a for ch in "\r\n"):
+                errors.append(f"{base}.argv[{j}]: no line breaks")
         for w in entry["writes"]:
             if not c.is_repo_relative(w):
                 errors.append(f"{base}.writes: '{w}' must be repository-relative")
@@ -562,6 +595,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("run_dir")
     p.add_argument("role", choices=ROLES)
     p.add_argument("--n", type=int, default=1)
+    p.add_argument("--agent", help="agent id of the launched sub-agent; recorded so no later agent reuses it")
     p.set_defaults(func=cmd_count)
 
     p = sub.add_parser("set-status")

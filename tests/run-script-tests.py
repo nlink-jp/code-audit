@@ -480,6 +480,44 @@ class RunPyTests(RunFixture):
         (self.run_dir / "commands.json").write_text(json.dumps(cmds), encoding="utf-8")
         self.refused(run("run.py", "validate", str(self.run_dir)), "repository-relative path")
 
+    def test_round_two_init_and_metadata_guards(self) -> None:
+        # S1: the budget changes only through approve once approved
+        self.seed()
+        self.refused(run("run.py", "set-budget", str(self.run_dir), "99"), "changes only through run.py approve")
+        # S16: an existing file as output
+        f = self.tmpdir / "afile"
+        f.write_text("x", encoding="utf-8")
+        self.refused(run("run.py", "init", "--target", str(self.target), "--output", str(f)), "not a directory")
+        # S15: outside by identity, inside by name
+        outside = self.tmpdir / "outside-out"
+        outside.mkdir()
+        os.symlink(outside, self.target / "link-out")
+        self.refused(run("run.py", "init", "--target", str(self.target), "--output", str(self.target / "link-out" / "run")), "inside the target by name")
+        # S13: an unversioned target's name is reduced to a repository-name shape
+        odd = self.tmpdir / "ev il\x1bname"
+        shutil.copytree(SAMPLE_REPO, odd)
+        out = self.ok(run("run.py", "init", "--target", str(odd), "--output", str(self.tmpdir / "odd-out")))
+        self.assertEqual(out["repo"], "ev-il-name")
+        # S11: the same prior twice is one prior
+        out = self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(self.tmpdir / "p2"), "--prior", str(self.run_dir), "--prior", str(self.run_dir)))
+        self.assertEqual(json.loads((self.tmpdir / "p2" / "run-metadata.json").read_text(encoding="utf-8"))["prior_runs"], ["run-1"])
+        # S10: stderr carries no control characters even when quoting an offending value
+        proc = run("run.py", "set-status", str(self.run_dir), "incomplete", "--reason", "x")
+        self.assertEqual(proc.returncode, 0)
+        proc = run("ledger.py", "assign", str(self.run_dir), "--agent", "bad\x1b[31mid", "x")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertNotIn("\x1b", proc.stderr)
+
+    @unittest.skipUnless(shutil.which("git"), "git not available")
+    def test_round_two_commondir_predicate(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        import run as run_module  # noqa: E402
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+        for cmd in (["git", "init", "-q"], ["git", "add", "."], ["git", "commit", "-q", "-m", "fixture"]):
+            subprocess.run(cmd, cwd=str(self.target), check=True, capture_output=True, env=env)
+        (self.target / ".git" / "commondir").write_text("..\n", encoding="utf-8")
+        self.assertIsNone(run_module.resolve_git_dir(self.target))
+
 
 class LedgerTests(RunFixture):
     def test_seed_derives_ids_and_digests(self) -> None:
@@ -523,6 +561,33 @@ class LedgerTests(RunFixture):
         self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1))
         self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u2), "already used in this run")
         self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-2", u2))
+
+    def test_assign_counts_the_hunter_and_keeps_the_reserve_with_in_progress_units(self) -> None:
+        self.seed(approve=False)
+        u1, u2 = self.unit_ids()
+        # standard: 3 critics + 2 stages × max(1, ceil(hunting × 0.3)) = 5 reserved; budget 6 fits one hunter only
+        self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "6"))
+        out = self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1))
+        self.assertEqual(out["invocations"]["hunter"], 1)
+        meta = json.loads((self.run_dir / "run-metadata.json").read_text(encoding="utf-8"))
+        self.assertEqual((meta["invocations"]["hunter"], meta["agents"]), (1, ["hunter-1"]))
+        self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-2", u2), "cannot take another hunter")
+        # S8: ids registered by count, by a critic, or by a note are used ids
+        self.ok(run("run.py", "count", str(self.run_dir), "verifier", "--agent", "verifier-9"))
+        self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "40"))
+        self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "verifier-9", u2), "already used in this run")
+        self.ok(run("findings.py", "note", str(self.run_dir), "--agent", "critic-3", "--kind", "hardening", "--text", "x"))
+        self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "critic-3", u2), "already used in this run")
+
+    def test_critic_ids_are_used_ids(self) -> None:
+        self.hunt()
+        stop = {"agent_id": "critic-1", "missing_units": [], "reassign_ids": [], "resolved_prior_leads": [], "stop": True}
+        self.ok(run("ledger.py", "merge-critic", str(self.run_dir), str(self.write_json(stop, "c.json")), "--target", str(self.target)))
+        self.ok(run("ledger.py", "abandon", str(self.run_dir), "--agent", "hunter-1", "--reason", "x")) if False else None
+        u1, u2 = self.unit_ids()
+        critic2 = {"agent_id": "critic-2", "missing_units": [], "reassign_ids": [{"coverage_id": u2, "reason": "x"}], "resolved_prior_leads": [], "stop": False}
+        self.ok(run("ledger.py", "merge-critic", str(self.run_dir), str(self.write_json(critic2, "c2.json")), "--target", str(self.target)))
+        self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "critic-1", u2), "already used in this run")
 
     def test_assign_moves_planned_units_to_in_progress(self) -> None:
         self.seed()
@@ -788,6 +853,81 @@ class LedgerTests(RunFixture):
         cands_path.write_text(json.dumps(cands), encoding="utf-8")
         self.refused(run("ledger.py", "validate", str(self.run_dir)), "linked to no ledger unit")
 
+    def test_digest_values_must_be_real_digests(self) -> None:
+        # S5 for units: a starting path that does not exist or is a link is refused
+        props = json.loads((FIXTURES / "units.json").read_text(encoding="utf-8"))
+        bad = json.loads(json.dumps(props[0]))
+        bad["starting_paths"] = ["app/ghost.py"]
+        self.refused(run("ledger.py", "seed", str(self.run_dir), "--target", str(self.target), "--units", str(self.write_json([bad], "ghost.json"))), "is missing")
+        # S5 for records: a record citing a missing file is refused even with digests filled
+        self.hunt()
+        rec = self.candidate_record(0)
+        rec["trace"][2]["file"] = "app/ghost.py"
+        rec["evidence"][1]["file"] = "app/ghost.py"
+        path = self.write_json(rec, "ghost-rec.json")
+        self.ok(run("findings.py", "digest", str(path), "--target", str(self.target)))
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["source_digests"]["app/ghost.py"], "missing")
+        self.refused(run("findings.py", "add", str(self.run_dir), str(path), "--target", str(self.target)), "is missing; a record cites existing regular files only")
+        sys.path.insert(0, str(SCRIPTS))
+        import _contract as contract  # noqa: E402
+        self.assertFalse(contract.digests_unchanged({"x": "missing"}, {"x": "missing"}))
+        self.assertFalse(contract.digests_unchanged({"x": "symlink"}, {"x": "symlink"}))
+        # S9: a directly cited file past the byte limit is too-large
+        limits = dict(contract.DIGEST_LIMITS)
+        try:
+            contract.DIGEST_LIMITS["bytes"] = 10
+            self.assertEqual(contract.digests_for(self.target, ["app/files.py"])["app/files.py"], "too-large")
+        finally:
+            contract.DIGEST_LIMITS.clear()
+            contract.DIGEST_LIMITS.update(limits)
+
+    def test_log_header_cannot_be_forged_through_the_command_ledger(self) -> None:
+        cmds = json.loads((FIXTURES / "commands.json").read_text(encoding="utf-8"))
+        slow = next(e for e in cmds["commands"] if e["id"] == "slow")
+        slow["source"] = "Makefile#test\ntimed_out: False\nexit_code: 0"
+        (self.run_dir / "commands.json").write_text(json.dumps(cmds), encoding="utf-8")
+        self.refused(run("run.py", "validate", str(self.run_dir)), "no line breaks")
+
+    def test_redecide_reaches_an_archived_attempt_and_complete_checks_the_books(self) -> None:
+        self.hunt()
+        u1, u2 = self.unit_ids()
+        for i in (0, 1):
+            self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(i), f"r{i}.json"))))
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.fill("record-rejected.json"))))
+        for fp, v in (("app/files.py:read_user_file:path-traversal", "confirmed"), ("app/files.py:read_user_file:symlink-escape", "needs_validation"), ("app/files.py:list_user_files:enumeration", "rejected")):
+            self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", v))
+        critic = {"agent_id": "critic-1", "missing_units": [], "reassign_ids": [{"coverage_id": u1, "reason": "x"}], "resolved_prior_leads": [], "stop": False}
+        self.ok(run("ledger.py", "merge-critic", str(self.run_dir), str(self.write_json(critic, "c.json")), "--target", str(self.target)))
+        fp = "app/files.py:read_user_file:path-traversal"
+        weaker = json.loads(json.dumps(self.candidate_record(1)))
+        weaker["fingerprint"], weaker["coverage_ids"] = fp, [u1]
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(weaker, "nv.json")), "--replace", "--by", "reverifier-1"))
+        self.ok(run("ledger.py", "defer", str(self.run_dir), "--reason", "budget_reserved_for_verification", u1))
+        self.refused(run("run.py", "set-status", str(self.run_dir), "complete"), "deferred for budget")
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-2", u1)) if False else None
+        out = self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", "needs_validation"))
+        self.assertEqual(out["previous_verdict"], "confirmed")
+        unit = next(u for u in self.ledger() if u["coverage_id"] == u1)
+        self.assertEqual(unit["attempts"][0]["decisions"][fp], "needs_validation")
+        self.ok(run("ledger.py", "validate", str(self.run_dir)))
+        self.ok(run("findings.py", "validate", str(self.run_dir)))
+
+    def test_complete_runs_the_cross_check_and_refuses_blocked_units(self) -> None:
+        self.hunt()
+        rec = self.candidate_record(0)
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "a.json"))))
+        for i, fp in ((1, "app/files.py:read_user_file:symlink-escape"),):
+            self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(i), f"r{i}.json"))))
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.fill("record-rejected.json"))))
+        for fp, v in (("app/files.py:read_user_file:path-traversal", "confirmed"), ("app/files.py:read_user_file:symlink-escape", "needs_validation"), ("app/files.py:list_user_files:enumeration", "rejected")):
+            self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", v))
+        weaker = json.loads(json.dumps(self.candidate_record(1)))
+        weaker["fingerprint"], weaker["coverage_ids"] = rec["fingerprint"], rec["coverage_ids"]
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(weaker, "nv.json")), "--replace", "--by", "reverifier-1"))
+        self.refused(run("run.py", "set-status", str(self.run_dir), "complete"), "the ledger decided confirmed")
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", rec["fingerprint"], "--verdict", "needs_validation"))
+        self.ok(run("run.py", "set-status", str(self.run_dir), "complete"))
+
     def test_merge_critic_quick_defers_instead(self) -> None:
         quick = self.tmpdir / "out" / "quick"
         self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(quick), "--profile", "quick"))
@@ -810,7 +950,7 @@ class LedgerTests(RunFixture):
         self.assertEqual((est["hunters"], est["critics"], est["verification_stages"]), (2, 3, 2))
         self.assertEqual(est["tokens_estimate"], est["total_invocations"] * 50000)
         self.assertTrue(est["fits_budget"])
-        self.ok(run("run.py", "set-budget", str(self.run_dir), "2"))
+        self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "2"))
         self.assertFalse(self.ok(run("ledger.py", "estimate", str(self.run_dir)))["fits_budget"])
         out = self.ok(run("ledger.py", "defer", str(self.run_dir), "--reason", "budget_cannot_reserve_critics_and_validation", "--all-planned"))
         self.assertEqual(len(out["deferred"]), 2)
@@ -972,6 +1112,12 @@ class FindingsTests(RunFixture):
         path = self.write_json([rec, rec], "dup.json")
         self.refused(run("findings.py", "validate", str(path)), "duplicate of findings[0]")
 
+    def test_add_keeps_the_queued_candidates_coverage_ids(self) -> None:
+        self.hunt()
+        u1, u2 = self.unit_ids()
+        moved = self.candidate_record(0, coverage_ids=[u2])
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(moved, "m.json"))), "must be the queued candidate's")
+
     def test_redecide_after_a_verdict_changing_replacement(self) -> None:
         self.hunt()
         rec = self.candidate_record(0)
@@ -1077,6 +1223,37 @@ class PriorRunTests(RunFixture):
         self.assertEqual(sorted(out["duplicate_candidates"]), ["app/files.py:read_user_file:path-traversal", "app/files.py:read_user_file:symlink-escape"])
         self.assertEqual(out["queued_candidates"], [])
         self.ok(run("ledger.py", "validate", str(run2)))
+
+    def test_a_later_prior_verdict_wins_over_an_earlier_suppression(self) -> None:
+        self.complete_run()
+        later = self.tmpdir / "out" / "run-1b"
+        shutil.copytree(self.run_dir, later)
+        findings = json.loads((later / "findings.json").read_text(encoding="utf-8"))
+        nv = self.candidate_record(2)
+        findings = [r for r in findings if r["fingerprint"] != nv["fingerprint"]] + [nv]
+        findings.sort(key=lambda r: r["fingerprint"])
+        (later / "findings.json").write_text(json.dumps(findings), encoding="utf-8")
+        meta = json.loads((later / "run-metadata.json").read_text(encoding="utf-8"))
+        meta["run_id"], meta["created"] = "run-1b", "2099-01-01T00:00:00+00:00"
+        (later / "run-metadata.json").write_text(json.dumps(meta), encoding="utf-8")
+        run3 = self.tmpdir / "out" / "run-3"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run3), "--prior", str(later), "--prior", str(self.run_dir)))
+        out = self.ok(run("ledger.py", "seed", str(run3), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(later), "--prior", str(self.run_dir)))
+        self.assertIn("app/files.py:list_user_files:enumeration", out["carried"])
+        self.assertEqual(out["suppressed"], [])
+        self.assertEqual(out["prior_runs"], ["run-1", "run-1b"], "priors are read oldest first so the latest verdict wins")
+
+    def test_changed_source_prior_records_are_reported(self) -> None:
+        self.complete_run()
+        (self.target / "app" / "files.py").write_text((self.target / "app" / "files.py").read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
+        run2 = self.tmpdir / "out" / "run-2"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
+        out = self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.assertEqual(out["carried"], [])
+        cands = json.loads((run2 / "candidates.json").read_text(encoding="utf-8"))
+        self.assertEqual(sorted(r["fingerprint"] for r in cands["changed_prior"]), ["app/files.py:read_user_file:path-traversal", "app/files.py:read_user_file:symlink-escape"])
+        self.ok(run("compile.py", str(run2)))
+        self.assertIn("### Prior records whose cited sources changed", (run2 / "REPORT.md").read_text(encoding="utf-8"))
 
     def test_carried_record_on_a_deferred_unit_is_decidable(self) -> None:
         self.complete_run()

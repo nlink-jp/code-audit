@@ -63,15 +63,22 @@ def write_json(path: Path, data: object) -> None:
     os.replace(tmp, path)
 
 
+def inert(text: str) -> str:
+    """One line for the parent's terminal: no control or format character.
+    Error messages quote offending values, and those values came from the
+    target or a sub-agent."""
+    return "".join(ch for ch in text if not unicodedata.category(ch).startswith("C"))
+
+
 def die(message: str, code: int = 1) -> None:
-    print(f"ERROR: {message}", file=sys.stderr)
+    print(f"ERROR: {inert(message)}", file=sys.stderr)
     sys.exit(code)
 
 
 def fail_if(errors: list[str]) -> None:
     if errors:
         for err in errors:
-            print(f"ERROR: {err}", file=sys.stderr)
+            print(f"ERROR: {inert(err)}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -371,7 +378,7 @@ def digests_for(target: Path, paths: Iterable[str]) -> dict[str, str]:
         if stat.S_ISLNK(st.st_mode):
             out[rel] = "symlink"
         elif stat.S_ISREG(st.st_mode):
-            out[rel] = sha256_file(p)
+            out[rel] = "too-large" if st.st_size > DIGEST_LIMITS["bytes"] else sha256_file(p)
         elif stat.S_ISDIR(st.st_mode):
             h = hashlib.sha256()
             files = total = 0
@@ -390,10 +397,20 @@ def digests_for(target: Path, paths: Iterable[str]) -> dict[str, str]:
     return out
 
 
+DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def is_digest(value: object) -> bool:
+    return isinstance(value, str) and bool(DIGEST_RE.fullmatch(value))
+
+
 def digests_unchanged(recorded: dict, current: dict) -> bool:
+    """Unchanged only when every recorded value is a real digest and the
+    current one equals it. 'missing', 'symlink' or 'too-large' twice is not
+    evidence that anything stayed the same."""
     if not recorded:
         return False
-    return all(current.get(k) == v for k, v in recorded.items())
+    return all(is_digest(v) and current.get(k) == v for k, v in recorded.items())
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +428,7 @@ def load_metadata(run_dir: Path) -> dict:
     return data  # type: ignore[return-value]
 
 
-CANDIDATE_KEYS = ("candidates", "carried", "decided", "suppressed", "uncovered", "resolved_prior_leads", "unlinked_prior")
+CANDIDATE_KEYS = ("candidates", "carried", "decided", "suppressed", "uncovered", "resolved_prior_leads", "unlinked_prior", "changed_prior", "agents_seen")
 
 
 def load_candidates(run_dir: Path) -> dict:

@@ -15,6 +15,7 @@
         "profile": { "type": "string", "enum": ["quick", "standard"] },
         "budget": { "type": ["integer", "null"], "minimum": 1 },
         "approved": { "type": "boolean" },
+        "agents": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" } },
         "prior_runs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "invocations": {
           "type": "object",

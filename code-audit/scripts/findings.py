@@ -132,10 +132,13 @@ def cmd_add(args: argparse.Namespace) -> None:
         missing = [cid for cid in rec["coverage_ids"] if cid not in ids]
         if missing:
             c.die(f"{fp}: coverage ids not in the ledger: {missing}")
-        pending = {r["fingerprint"] for key in ("candidates", "carried") for r in cands[key]}
+        queued = {r["fingerprint"]: r for key in ("candidates", "carried") for r in cands[key]}
+        pending = set(queued)
         decided = {d["fingerprint"] for d in cands["decided"]}
         if not existing and fp not in pending:
             c.die(f"{fp}: not a pending candidate of this run; a record needs a claim the ledger holds")
+        if not existing and set(queued[fp].get("coverage_ids", [])) != set(rec["coverage_ids"]):
+            c.die(f"{fp}: the record's coverage_ids must be the queued candidate's: {sorted(queued[fp].get('coverage_ids', []))}")
         if existing and fp not in decided:
             c.die(f"{fp}: the record exists but was never decided; run ledger.py decide before replacing it")
     replaced = None

@@ -104,6 +104,10 @@ def build_unit(proposal: dict, profile: str, target: Path, where: str) -> tuple[
         err = class_ref_error(ref)
         if err:
             errors.append(f"{where}.{label}: {err}")
+    digests = c.digests_for(target, proposal["starting_paths"])
+    for rel, value in digests.items():
+        if not c.is_digest(value):
+            errors.append(f"{where}.starting_paths: '{rel}' is {value}; a starting path is an existing regular file or directory of the target")
     if errors:
         return None, errors
     unit = {
@@ -117,7 +121,7 @@ def build_unit(proposal: dict, profile: str, target: Path, where: str) -> tuple[
         "selected_classes": list(proposal["selected_classes"]),
         "excluded_classes": list(proposal["excluded_classes"]),
         "prior_status": "none",
-        "source_digests": c.digests_for(target, proposal["starting_paths"]),
+        "source_digests": digests,
         "attempts": [],
         "wave": 1,
         "status": "planned",
@@ -252,7 +256,7 @@ def check_log_problem(run_dir: Path, log: str) -> str | None:
                 break
             if ":" in line:
                 k, v = line.split(":", 1)
-                head[k.strip()] = v.strip()
+                head.setdefault(k.strip(), v.strip())  # the first occurrence is the header's
     if head.get("timed_out") == "True":
         return f"{log}: the command timed out; its log is not evidence"
     if head.get("exit_code") in (None, "None"):
@@ -312,9 +316,12 @@ def cross_check(findings: list, units: list, candidates: dict) -> list[str]:
             errors.append(f"findings[{i}] {fp}: record added but not decided; run ledger.py decide")
         else:
             errors.append(f"findings[{i}] {fp}: not a candidate of this run")
+        holders = {u["coverage_id"] for u in units if isinstance(u, dict) and (fp in u.get("result_fingerprints", []) or any(fp in att.get("result_fingerprints", []) for att in u.get("attempts", [])))}
         for cid in rec.get("coverage_ids", []):
             if cid not in ids:
                 errors.append(f"findings[{i}] {fp}: coverage id {cid} is not in the ledger")
+            elif fp in decided and cid not in holders:
+                errors.append(f"findings[{i}] {fp}: coverage id {cid} never claimed this fingerprint")
     for fp, verdict in decided.items():
         if fp not in by_fp:
             errors.append(f"decided {fp}: no record in {c.FINDINGS_FILE}")
@@ -384,7 +391,7 @@ def load_prior(path: Path) -> dict:
                 warnings.append(f"prior {path.name}: record {i} dropped (does not validate)")
                 continue
             findings.append(rec)
-    return {"run_id": meta["run_id"], "name": path.resolve().name, "ledger": ledger, "findings": findings, "profile": meta["profile"], "warnings": warnings}
+    return {"run_id": meta["run_id"], "name": path.resolve().name, "ledger": ledger, "findings": findings, "profile": meta["profile"], "created": meta.get("created", ""), "warnings": warnings}
 
 
 def prior_status_from_unit(pu: dict, current_digests: dict) -> str:
@@ -432,7 +439,11 @@ def cmd_seed(args: argparse.Namespace) -> None:
     c.fail_if(errors)
     c.fail_if(add_units(units, built, "proposals"))
 
-    priors = [load_prior(Path(p)) for p in (args.prior or [])]
+    prior_paths: list[Path] = []
+    for p in args.prior or []:
+        if not any(c.same_place(Path(p), q) for q in prior_paths):
+            prior_paths.append(Path(p))
+    priors = sorted((load_prior(p) for p in prior_paths), key=lambda p: p["created"])
     candidates = c.load_candidates(run_dir)
     warnings: list[str] = [w for p in priors for w in p["warnings"]]
     ids = by_id(units)
@@ -478,11 +489,15 @@ def cmd_seed(args: argparse.Namespace) -> None:
                         propose(u, "prior_confirmed_same_source" if same else "prior_confirmed_changed_source")
                     if same:
                         candidates["carried"].append(carried)
+                    else:
+                        candidates["changed_prior"].append({"fingerprint": fp, "title": rec.get("title", ""), "verdict": verdict, "prior_run": prior["run_id"], "units": [u["coverage_id"] for u in linked]})
                 elif verdict == "needs_validation":
                     for u in linked:
                         propose(u, "prior_needs_validation")
                     if same:
                         candidates["carried"].append(carried)
+                    else:
+                        candidates["changed_prior"].append({"fingerprint": fp, "title": rec.get("title", ""), "verdict": verdict, "prior_run": prior["run_id"], "units": [u["coverage_id"] for u in linked]})
                 elif verdict == "rejected":
                     if same:
                         candidates["suppressed"].append({"fingerprint": fp, "title": rec.get("title", ""), "prior_run": prior["run_id"]})
@@ -491,6 +506,10 @@ def cmd_seed(args: argparse.Namespace) -> None:
                             propose(u, "prior_rejected_claim_changed")
         for cid, status in proposed.items():
             ids[cid]["prior_status"] = status
+        # The latest prior's verdict wins: a claim carried for re-verification
+        # is not also suppressed.
+        carried_fps = {r["fingerprint"] for r in candidates["carried"]}
+        candidates["suppressed"] = [r for r in candidates["suppressed"] if r["fingerprint"] not in carried_fps]
     save_ledger(run_dir, units, candidates)
     c.emit({
         "units": len(units),
@@ -527,7 +546,7 @@ def cmd_assign(args: argparse.Namespace) -> None:
         est = estimate_numbers(meta, units, candidates)
         if est["spent"] + 1 + est["reserve_for_critics_and_verifiers"] > meta["budget"]:
             errors.append(f"budget {meta['budget']} cannot take another hunter and still reserve {est['reserve_for_critics_and_verifiers']} for critics and verifiers (spent {est['spent']}); defer the planned units instead")
-    if args.agent in used_agent_ids(units):
+    if args.agent in used_agent_ids(units, candidates, run_dir):
         errors.append(f"{args.agent}: agent id already used in this run; every agent is a fresh one")
     for cid in args.coverage_ids:
         u = ids.get(cid)
@@ -542,7 +561,15 @@ def cmd_assign(args: argparse.Namespace) -> None:
         ids[cid]["status"] = "in_progress"
         ids[cid]["agent_id"] = args.agent
     save_ledger(run_dir, units, candidates)
-    c.emit({"agent_id": args.agent, "assigned": list(args.coverage_ids)})
+    # The assignment is the hunter's launch: it is counted here, by the books,
+    # not by the parent's later self-report.
+    meta["invocations"]["hunter"] += 1
+    meta.setdefault("agents", [])
+    if args.agent not in meta["agents"]:
+        meta["agents"].append(args.agent)
+    c.fail_if(c.validate_part(meta, "metadata"))
+    c.write_json(run_dir / c.METADATA_FILE, meta)
+    c.emit({"agent_id": args.agent, "assigned": list(args.coverage_ids), "invocations": meta["invocations"]})
 
 
 def candidate_as_record(cand: dict, where: str) -> tuple[dict | None, list[str]]:
@@ -595,9 +622,11 @@ def record_errors(run_dir: Path | None, rec: dict, where: str) -> list[str]:
                 errors.append(f"{where}.trace[{i}].kind: intermediate entries are propagation")
     if not rec["source_digests"]:
         errors.append(f"{where}.source_digests: must digest the cited paths")
-    for k in rec["source_digests"]:
+    for k, v in rec["source_digests"].items():
         if not c.is_repo_relative(k):
             errors.append(f"{where}.source_digests: '{k}' must be repository-relative")
+        elif not c.is_digest(v):
+            errors.append(f"{where}.source_digests: '{k}' is {v}; a record cites existing regular files only")
     if verdict == "confirmed":
         sev = rec["severity"]
         if c.IMPACT_ORDER.index(sev["overall"]) > c.IMPACT_ORDER.index(sev["impact"]["score"]):
@@ -817,6 +846,8 @@ def cmd_merge_critic(args: argparse.Namespace) -> None:
             candidates["carried"] = keep
             candidates["resolved_prior_leads"].append({**lead, "agent_id": critic["agent_id"]})
             resolved.append(fp)
+    if critic["agent_id"] not in candidates["agents_seen"]:
+        candidates["agents_seen"].append(critic["agent_id"])
     save_ledger(run_dir, units, candidates)
     planned = [u["coverage_id"] for u in units if u["status"] == "planned"]
     c.emit({
@@ -849,10 +880,16 @@ def cmd_decide(args: argparse.Namespace) -> None:
         # Re-decision after a re-verifier's replacement changed the verdict.
         previous = decided[-1]["verdict"]
         linked = [u for u in units if fp in u["result_fingerprints"]]
-        if not linked:
+        archived = [u for u in units if any(fp in att["result_fingerprints"] for att in u["attempts"])]
+        if not linked and not archived:
             c.die(f"{fp}: no ledger unit links this fingerprint")
         for u in linked:
             u["decisions"][fp] = verdict
+        for u in archived:
+            for att in u["attempts"]:
+                if fp in att["result_fingerprints"]:
+                    att.setdefault("decisions", {})[fp] = verdict
+        linked = linked or archived
         for d in decided:
             d["verdict"] = verdict
         save_ledger(run_dir, units, candidates)
@@ -869,7 +906,7 @@ def cmd_decide(args: argparse.Namespace) -> None:
             if u["status"] in ("planned", "deferred"):
                 if not args.agent or not c.is_agent_id(args.agent):
                     c.die(f"{fp}: linking a carried record to {u['status']} unit {cid} needs --agent (the verifier becomes the owner)")
-                if args.agent in used_agent_ids(units) and not any(x["agent_id"] == args.agent for x in linked):
+                if args.agent in used_agent_ids(units, candidates, run_dir) and not any(x["agent_id"] == args.agent for x in linked):
                     c.die(f"{fp}: {args.agent} already used in this run; the verifier of a carried record is a fresh agent")
                 files = sorted({e["file"] for e in rec["evidence"]})
                 u["status"] = "candidate"
@@ -951,10 +988,11 @@ def estimate_numbers(meta: dict, units: list, candidates: dict) -> dict:
     invocations and what must stay reserved for critics and verifiers."""
     quick = meta["profile"] == "quick"
     planned = sum(1 for u in units if u["status"] == "planned")
+    hunting = planned + sum(1 for u in units if u["status"] == "in_progress")
     pending = len(candidates["candidates"]) + len(candidates["carried"])
     stages = 1 if quick else 2
     critics = 1 if quick else 3
-    expected_candidates = pending + max(1, math.ceil(planned * 0.3))
+    expected_candidates = pending + max(1, math.ceil(hunting * 0.3))
     verifiers = expected_candidates * stages
     spent = sum(meta["invocations"].values())
     return {
@@ -972,10 +1010,29 @@ def estimate_numbers(meta: dict, units: list, candidates: dict) -> dict:
     }
 
 
-def used_agent_ids(units: list) -> set[str]:
-    """Every agent id the ledger has seen: owners, archived attempts, checks.
-    An id is used once per run so that 'a fresh agent' is a fact of the books."""
+def used_agent_ids(units: list, candidates: dict | None = None, run_dir: Path | None = None) -> set[str]:
+    """Every agent id the run has seen: unit owners, archived attempts and
+    checks, candidate and uncovered authors, critics, note and replacement
+    authors, and every id `run.py count --agent` registered. An id is used
+    once per run so that 'a fresh agent' is a fact of the books."""
     used: set[str] = set()
+    if candidates:
+        for key in ("candidates", "carried", "uncovered", "resolved_prior_leads"):
+            for r in candidates.get(key, []):
+                if isinstance(r, dict) and r.get("agent_id"):
+                    used.add(r["agent_id"])
+        used.update(a for a in candidates.get("agents_seen", []) if isinstance(a, str))
+    if run_dir is not None:
+        for n in c.load_notes(run_dir):
+            if isinstance(n, dict) and n.get("agent_id"):
+                used.add(n["agent_id"])
+        for r in c.load_replacements(run_dir):
+            for key in ("by", "confirmed_by"):
+                if isinstance(r, dict) and r.get(key):
+                    used.add(r[key])
+        meta_path = run_dir / c.METADATA_FILE
+        if meta_path.exists():
+            used.update(a for a in (c.read_json(meta_path) or {}).get("agents", []) if isinstance(a, str))
     for u in units:
         if u.get("agent_id"):
             used.add(u["agent_id"])
