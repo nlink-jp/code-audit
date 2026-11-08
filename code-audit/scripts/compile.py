@@ -29,7 +29,7 @@ L = {
         "title": "code-audit 報告書",
         "run": "実行の事実",
         "run_id": "run_id", "repo": "リポジトリ", "source_ref": "source ref", "dirty": "作業ツリーに未コミットの変更", "profile": "プロファイル",
-        "budget": "予算（呼び出し回数）", "invocations": "実績の呼び出し回数", "status": "run_status", "prior": "持ち越した過去の実行", "policy": "実行方針", "created": "開始", "replacements": "再検証で置換したレコード", "replacements_value": "{n} 件（うち強化 {s} 件、いずれも別の新しい検証者が確認）",
+        "budget": "予算（呼び出し回数）", "invocations": "実績の呼び出し回数", "status": "run_status", "prior": "持ち越した過去の実行", "policy": "実行方針", "created": "開始", "replacements": "再検証で置換したレコード", "replacements_value": "{n} 件（うち強化 {s} 件、いずれも別の新しい検証者が確認）", "replacements_value_none": "{n} 件（文言・行番号の修正のみ、強化なし）",
         "yes": "あり", "no": "なし", "none": "なし", "unset": "未設定", "th_item": "項目", "th_value": "値",
         "partial": "この実行は部分的な網羅です。",
         "partial_quick": "quick プロファイルはハンター 1 波と批評 1 回の事前宣言された早期終了であり、網羅の完了を意味しません。",
@@ -59,7 +59,7 @@ L = {
         "title": "code-audit report",
         "run": "Run facts",
         "run_id": "run_id", "repo": "repository", "source_ref": "source ref", "dirty": "uncommitted changes in the worktree", "profile": "profile",
-        "budget": "budget (invocations)", "invocations": "actual invocations", "status": "run_status", "prior": "prior runs carried", "policy": "execution policy", "created": "started", "replacements": "records replaced after re-verification", "replacements_value": "{n} ({s} strengthening, each confirmed by a second fresh verifier)",
+        "budget": "budget (invocations)", "invocations": "actual invocations", "status": "run_status", "prior": "prior runs carried", "policy": "execution policy", "created": "started", "replacements": "records replaced after re-verification", "replacements_value": "{n} ({s} strengthening, each confirmed by a second fresh verifier)", "replacements_value_none": "{n} (wording or line corrections only, none strengthening)",
         "yes": "yes", "no": "no", "none": "none", "unset": "unset", "th_item": "Item", "th_value": "Value",
         "partial": "This run is a partial pass.",
         "partial_quick": "The quick profile is a pre-declared early stop (one hunter wave, one critic) and is not evidence of complete coverage.",
@@ -164,7 +164,7 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
     ]
     if replacements:
         strong = sum(1 for r in replacements if r.get("strengthened"))
-        rows.append([t["replacements"], t["replacements_value"].format(n=len(replacements), s=strong)])
+        rows.append([t["replacements"], (t["replacements_value"] if strong else t["replacements_value_none"]).format(n=len(replacements), s=strong)])
     out += table([t["th_item"], t["th_value"]], rows)
     partial = []
     if meta["profile"] == "quick":

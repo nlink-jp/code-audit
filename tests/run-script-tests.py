@@ -879,6 +879,19 @@ class LedgerTests(RunFixture):
         self.assertIn("Candidates merged as duplicates", report)
         self.assertIn(f"`{dup}` → `{keep}`", report)
 
+    def test_hunter_brief_holds_assigned_units_and_class_text(self) -> None:
+        # E15 (E2E 2026-11-08): the parent never retypes a unit or pastes a class by hand
+        self.seed()
+        u1, u2 = self.unit_ids()
+        self.refused(run("ledger.py", "brief", str(self.run_dir), "hunter", "--agent", "hunter-1"), "no in_progress unit")
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1, u2))
+        hb = self.ok(run("ledger.py", "brief", str(self.run_dir), "hunter", "--agent", "hunter-1"))
+        self.assertEqual({u["coverage_id"] for u in hb["units"]}, {u1, u2})
+        self.assertIn("classes/generic.md#Resource and file handling", hb["classes"])
+        self.assertTrue(hb["classes"]["classes/generic.md#Injection"].startswith("## Injection"))
+        self.assertIn("Source:", hb["classes"]["classes/generic.md#Injection"])
+        self.refused(run("ledger.py", "brief", str(self.run_dir), "hunter"), "needs --agent")
+
     def test_record_accepts_extra_reviewed_paths_and_stores_the_union(self) -> None:
         # E3 (E2E 2026-11-08): a path read without a check is not coverage, so
         # the extra path is dropped, not refused.
@@ -1212,7 +1225,7 @@ class FindingsTests(RunFixture):
         self.ok(run("ledger.py", "validate", str(self.run_dir)))
         self.ok(run("compile.py", str(self.run_dir)))
         en = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
-        self.assertIn("| records replaced after re-verification | 1 (0 strengthening", en)
+        self.assertIn("| records replaced after re-verification | 1 (wording or line corrections only, none strengthening)", en)
 
 
 class PriorRunTests(RunFixture):
@@ -1260,16 +1273,36 @@ class PriorRunTests(RunFixture):
         cands = json.loads((run2 / "candidates.json").read_text(encoding="utf-8"))
         self.assertEqual(cands["carried"], [])
 
-    def test_prior_records_without_a_current_unit_are_reported_not_queued(self) -> None:
+    def test_prior_records_are_matched_by_place_across_profiles(self) -> None:
+        # E13 (E2E 2026-11-08): a standard prior under quick (and the reverse)
+        # differs only in the coverage id's subsystem token; the unit is the
+        # same surface × boundary × class, so its records still carry over.
         self.complete_run()
         quick = self.tmpdir / "out" / "quick"
         self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(quick), "--profile", "quick", "--prior", str(self.run_dir)))
         out = self.ok(run("ledger.py", "seed", str(quick), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.assertEqual(sorted(out["carried"]), ["app/files.py:read_user_file:path-traversal", "app/files.py:read_user_file:symlink-escape"])
+        self.assertEqual(out["suppressed"], ["app/files.py:list_user_files:enumeration"])
+        self.assertEqual(out["unlinked_prior"], [])
+        self.assertEqual(len(out["remapped_prior"]), 3)
+        units = {u["attack_class"]: u for u in json.loads((quick / "coverage-ledger.json").read_text(encoding="utf-8"))}
+        self.assertEqual(units["Resource and file handling"]["prior_status"], "prior_confirmed_same_source")
+        self.assertEqual(units["Injection"]["prior_status"], "prior_covered_same_source")
+        carried = json.loads((quick / "candidates.json").read_text(encoding="utf-8"))["carried"]
+        self.assertTrue(all(r["coverage_ids"] == [units["Resource and file handling"]["coverage_id"]] for r in carried))
+        self.assertTrue(all("profile%2Fquick" in cid for r in carried for cid in r["coverage_ids"]))
+
+    def test_prior_records_without_a_current_unit_are_reported_not_queued(self) -> None:
+        self.complete_run()
+        props = [p for p in json.loads((FIXTURES / "units.json").read_text(encoding="utf-8")) if p["attack_class"] != "Resource and file handling"]
+        run2 = self.tmpdir / "out" / "run-2"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
+        out = self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(self.write_json(props, "fewer.json")), "--prior", str(self.run_dir)))
         self.assertEqual(out["carried"], [])
         self.assertEqual(len(out["unlinked_prior"]), 3)
         self.assertTrue(any("unlinked_prior" in w for w in out["warnings"]))
-        self.ok(run("compile.py", str(quick)))
-        en = (quick / "REPORT.md").read_text(encoding="utf-8")
+        self.ok(run("compile.py", str(run2)))
+        en = (run2 / "REPORT.md").read_text(encoding="utf-8")
         self.assertIn("### Prior records that no current unit covers (no verdict)", en)
         self.assertIn("app/files.py:read_user_file:path-traversal", en)
         self.assertNotIn("| high |", en)
@@ -1286,6 +1319,18 @@ class PriorRunTests(RunFixture):
         self.assertEqual(out["prior_leads"], 1)
         brief = self.ok(run("ledger.py", "brief", str(run2), "critic"))
         self.assertEqual((brief["prior_leads"][0]["agent_id"], brief["prior_leads"][0]["prior_run"]), ("verifier-5", "run-1"))
+        # E14: a unit the critic adds to a run with priors is `new`, not `none`
+        critic = json.loads(self.fill("critic-result.json").read_text(encoding="utf-8"))
+        critic["reassign_ids"] = []
+        out = self.ok(run("ledger.py", "merge-critic", str(run2), str(self.write_json(critic, "c-prior.json")), "--target", str(self.target)))
+        added = next(u for u in json.loads((run2 / "coverage-ledger.json").read_text(encoding="utf-8")) if u["coverage_id"] == out["added"][0])
+        self.assertEqual(added["prior_status"], "new")
+        # E15: the re-verifier's brief is the decided record, its units and the logs, never the verifier's layers
+        rb = self.ok(run("ledger.py", "brief", str(self.run_dir), "reverifier", "--fingerprint", "app/files.py:read_user_file:path-traversal"))
+        self.assertEqual((rb["record"]["verdict"], len(rb["units"])), ("confirmed", 1))
+        self.assertNotIn("layers_examined", rb)
+        self.refused(run("ledger.py", "brief", str(self.run_dir), "reverifier", "--fingerprint", "nope:x:y"), "not in findings.json")
+        self.refused(run("ledger.py", "brief", str(self.run_dir), "reverifier"), "needs --fingerprint")
         self.ok(run("compile.py", str(run2)))
         self.assertIn("### Leads handed over from prior runs", (run2 / "REPORT.md").read_text(encoding="utf-8"))
 

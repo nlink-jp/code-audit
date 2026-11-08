@@ -405,6 +405,11 @@ def load_prior(path: Path) -> dict:
     return {"run_id": meta["run_id"], "name": path.resolve().name, "ledger": ledger, "findings": findings, "leads": leads, "profile": meta["profile"], "created": meta.get("created", ""), "warnings": warnings}
 
 
+def unit_triple(u: dict) -> tuple:
+    refs = u.get("canonical_refs", {})
+    return (refs.get("surface"), refs.get("boundary"), refs.get("attack_class"))
+
+
 def prior_status_from_unit(pu: dict, current_digests: dict) -> str:
     same = c.digests_unchanged(pu.get("source_digests", {}), current_digests)
     status = pu["status"]
@@ -458,6 +463,22 @@ def cmd_seed(args: argparse.Namespace) -> None:
     candidates = c.load_candidates(run_dir)
     warnings: list[str] = [w for p in priors for w in p["warnings"]]
     ids = by_id(units)
+    # A coverage id carries the profile's subsystem token, so a quick prior
+    # never matches a standard run by id. The unit is still the same place:
+    # surface × boundary × class resolves it (E13, E2E 2026-11-08).
+    by_triple: dict[tuple, list[str]] = {}
+    for u in units:
+        by_triple.setdefault(unit_triple(u), []).append(u["coverage_id"])
+    remapped: list[dict] = []
+
+    def resolve(prior: dict, cid: str) -> list[str]:
+        if cid in ids:
+            return [cid]
+        pu = next((x for x in (prior["ledger"] or []) if x.get("coverage_id") == cid), None)
+        if pu is None:
+            return []
+        return by_triple.get(unit_triple(pu), [])
+
     if priors:
         for u in units:
             u["prior_status"] = "new"
@@ -466,10 +487,9 @@ def cmd_seed(args: argparse.Namespace) -> None:
                 warnings.append(f"prior {prior['name']}: no ledger; treated as no coverage")
                 continue
             for pu in prior["ledger"]:
-                cu = ids.get(pu.get("coverage_id"))
-                if cu is None:
-                    continue
-                cu["prior_status"] = prior_status_from_unit(pu, cu["source_digests"])
+                for cid in resolve(prior, pu.get("coverage_id", "")):
+                    cu = ids[cid]
+                    cu["prior_status"] = prior_status_from_unit(pu, cu["source_digests"])
         # A record-derived status outranks a unit-derived one, and among
         # records the strongest prior claim wins for the unit.
         rank = {"prior_confirmed_changed_source": 5, "prior_confirmed_same_source": 4, "prior_needs_validation": 3, "prior_rejected_claim_changed": 2}
@@ -485,7 +505,14 @@ def cmd_seed(args: argparse.Namespace) -> None:
                 fp, verdict = rec.get("fingerprint"), rec.get("verdict")
                 current = c.digests_for(target, rec.get("source_digests", {}).keys())
                 same = c.digests_unchanged(rec.get("source_digests", {}), current)
-                linked = [ids[x] for x in rec.get("coverage_ids", []) if x in ids]
+                linked_ids: list[str] = []
+                for x in rec.get("coverage_ids", []):
+                    for cid in resolve(prior, x):
+                        if cid not in linked_ids:
+                            linked_ids.append(cid)
+                linked = [ids[x] for x in linked_ids]
+                if linked and set(linked_ids) != set(rec.get("coverage_ids", [])):
+                    remapped.append({"fingerprint": fp, "prior_run": prior["run_id"], "from": list(rec.get("coverage_ids", [])), "to": sorted(linked_ids)})
                 if not linked:
                     # No current unit covers it (a quick prior under standard,
                     # or a surface that no longer exists): nothing can decide
@@ -495,6 +522,7 @@ def cmd_seed(args: argparse.Namespace) -> None:
                     continue
                 carried = dict(rec)
                 carried["carried_from"] = prior["run_id"]
+                carried["coverage_ids"] = sorted(linked_ids)  # this run's ids; the verifier's record carries them
                 if verdict == "confirmed":
                     for u in linked:
                         propose(u, "prior_confirmed_same_source" if same else "prior_confirmed_changed_source")
@@ -536,6 +564,7 @@ def cmd_seed(args: argparse.Namespace) -> None:
         "suppressed": [r["fingerprint"] for r in candidates["suppressed"]],
         "unlinked_prior": [r["fingerprint"] for r in candidates["unlinked_prior"]],
         "prior_leads": len(candidates["prior_leads"]),
+        "remapped_prior": remapped,
         "warnings": warnings,
     })
 
@@ -834,6 +863,8 @@ def cmd_merge_critic(args: argparse.Namespace) -> None:
         unit, errs = build_unit(prop, meta["profile"], target, f"critic.missing_units[{i}]")
         errors += errs
         if unit:
+            if meta.get("prior_runs"):
+                unit["prior_status"] = "new"
             if quick:
                 unit["status"] = "deferred"
                 unit["unresolved"] = [f"quick_profile_final_critic: {prop.get('reason', 'proposed by the final critic')}"]
@@ -984,16 +1015,70 @@ def check_logs_brief(run_dir: Path) -> list[dict]:
     return out
 
 
+def class_section(ref: str) -> str:
+    """The verbatim text of one shipped class: from its heading to the next."""
+    file, heading = ref.split("#", 1)
+    path = class_files.DEFAULT_CLASSES / Path(file).name
+    lines = path.read_text(encoding="utf-8").splitlines()
+    out: list[str] = []
+    inside = False
+    for line in lines:
+        if line.startswith("## "):
+            if inside:
+                break
+            inside = line[3:].strip() == heading
+            if inside:
+                out.append(line)
+            continue
+        if inside:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
 def cmd_brief(args: argparse.Namespace) -> None:
-    """Print a sub-agent's input from the books. The critic's brief is the
-    whole ledger as it stands (coverage ids verbatim, so a reassignment can
-    name one); the verifier's brief is one pending candidate without the
-    queue's agent id, the facts of the units it cites, and the check logs.
-    The parent wraps the output in <target-data> and adds the class text."""
+    """Print a sub-agent's input from the books. The hunter's brief is its
+    assigned units with the verbatim text of their selected classes; the
+    critic's brief is the whole ledger as it stands (coverage ids verbatim, so
+    a reassignment can name one); the verifier's brief is one pending
+    candidate without the queue's agent id, the facts of the units it cites,
+    and the check logs; the re-verifier's brief is one decided record with
+    its units and the logs, never the verifier's layers. The parent wraps the
+    output in <target-data>."""
     run_dir = Path(args.run_dir)
     meta = c.load_metadata(run_dir)
     units = load_ledger(run_dir)
     candidates = c.load_candidates(run_dir)
+    if args.role == "hunter":
+        if not args.agent or not c.is_agent_id(args.agent):
+            c.die("the hunter's brief needs --agent <id>")
+        mine = [u for u in units if u["agent_id"] == args.agent and u["status"] == "in_progress"]
+        if not mine:
+            c.die(f"{args.agent}: no in_progress unit is assigned to it; run ledger.py assign first")
+        refs: list[str] = []
+        for u in mine:
+            for ref in u["selected_classes"]:
+                if ref not in refs:
+                    refs.append(ref)
+        c.emit({
+            "agent_id": args.agent,
+            "units": [unit_brief(u) for u in mine],
+            "classes": {ref: class_section(ref) for ref in refs},
+            "check_logs": check_logs_brief(run_dir),
+        })
+        return
+    if args.role == "reverifier":
+        if not args.fingerprint:
+            c.die("the re-verifier's brief needs --fingerprint")
+        rec = next((r for r in c.load_findings(run_dir) if r.get("fingerprint") == args.fingerprint), None)
+        if rec is None:
+            c.die(f"{args.fingerprint}: not in {c.FINDINGS_FILE}")
+        ids = by_id(units)
+        c.emit({
+            "record": rec,
+            "units": [unit_brief(ids[cid]) for cid in rec.get("coverage_ids", []) if cid in ids],
+            "check_logs": check_logs_brief(run_dir),
+        })
+        return
     if args.role == "critic":
         if args.fingerprint:
             c.die("the critic's brief takes no --fingerprint")
@@ -1144,8 +1229,8 @@ def counts(units: list) -> dict:
 
 
 UNITS_PER_HUNTER = 3
-CANDIDATES_PER_UNIT = 0.5
-RERUN_RATE = 0.2
+CANDIDATES_PER_UNIT = 0.35  # quick run 1: 0.67; standard run 2: 0.26 (2026-11-08)
+RERUN_RATE = 0.1  # quick run 1: 21%; standard run 2: 5% after the cut-6 contract wording
 
 
 def estimate_numbers(meta: dict, units: list, candidates: dict) -> dict:
@@ -1299,8 +1384,9 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("brief")
     p.add_argument("run_dir")
-    p.add_argument("role", choices=["critic", "verifier"])
-    p.add_argument("--fingerprint", help="the pending candidate a verifier's brief is about")
+    p.add_argument("role", choices=["hunter", "critic", "verifier", "reverifier"])
+    p.add_argument("--agent", help="the hunter whose assigned units the brief holds")
+    p.add_argument("--fingerprint", help="the pending candidate (verifier) or decided record (reverifier) the brief is about")
     p.set_defaults(func=cmd_brief)
 
     p = sub.add_parser("decide")
