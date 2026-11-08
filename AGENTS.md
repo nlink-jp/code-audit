@@ -12,21 +12,21 @@ coverage ledger and a human-approved cost gate. Hunting classes come from the
 organization's recorded defects (MCP servers, CLIs, LLM agent runtimes)
 beside generic classes. Invoked as `/code-audit <target-dir> ...`.
 
-**Status: Phase 1 complete (cuts 1–4), not released.** The five bookkeeping
+**Status: Phase 1 complete (cuts 1–5), not released.** The five bookkeeping
 scripts, the data contracts, the four hunting-class files (52 classes, 123
 citations verified against the knowledge, ADR and origin checkouts on
 2026-11-08) and the six-phase SKILL.md for both profiles exist and are
-tested over the fixture repository. The first pre-release independent
-verification ran on 2026-11-08 and its adopted findings are applied (cut 4;
-triage in `docs/{ja,en}/reviews/`). Left for Phase 3: a second verification
-pass over the fixes, E2E on two real repositories with cost recorded, the
-v0.1.0 release.
+tested over the fixture repository. Two pre-release independent
+verification rounds ran on 2026-11-08 and their adopted findings are applied
+(cuts 4 and 5; triage in `docs/{ja,en}/reviews/`); the rounds stop here, the
+second having found no high defect in the scripts. Left for Phase 3: E2E on
+two real repositories with cost recorded, the v0.1.0 release.
 
 ## Key commands
 
 | Command | Purpose |
 |---------|---------|
-| `make check` (= `make test`) | Structural validation + script behaviour tests (77 tests) |
+| `make check` (= `make test`) | Structural validation + script behaviour tests (89 tests) |
 | `make install` | Build the zip and unpack it into `~/.claude/skills/code-audit` |
 | `make install DEST=<path>` | Unpack into a custom skills directory |
 | `make uninstall` | Remove the installed copy |
@@ -37,7 +37,7 @@ Bundled scripts (stdlib-only Python 3.9+; `--help` on each):
 
 | Script | Subcommands | Owns |
 |--------|-------------|------|
-| `run.py` | `init`, `approve [--budget N]`, `nonce`, `set-budget`, `count`, `set-status`, `validate`, `exec` | `run-metadata.json`, `checks/<id>.log` |
+| `run.py` | `init`, `approve [--budget N]`, `nonce`, `set-budget`, `count [--agent]`, `set-status`, `validate`, `exec` | `run-metadata.json`, `checks/<id>.log` |
 | `ledger.py` | `seed [--prior]`, `assign`, `record`, `merge-critic`, `decide`, `defer`, `abandon`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json` (and appends hunter notes to `notes.json`) |
 | `findings.py` | `validate`, `add [--replace --by <agent> [--confirmed-by <agent>]]`, `digest`, `note` | `findings.json`, `replacements.json`, `notes.json` (`digest` writes back the record file it is given) |
 | `compile.py` | (run dir) | `REPORT.ja.md`, `REPORT.md`, `NEEDS-VALIDATION.ja.md`, `NEEDS-VALIDATION.md` |
@@ -187,13 +187,15 @@ code-audit/
 - **Candidates nobody decided stay in the queue** and `compile.py` lists
   them under "Candidates not verified" with no verdict and no severity; the
   parent sets the run `incomplete` when that happens.
-- **Class files**: `## Heading` then a `Source:` line before any body text,
-  citing `doc.md#Heading` (knowledge `docs/en/`) or `ADR-NNN`, several
+- **Class files**: `## Heading`, a `Source:` line, an optional `Refines:`
+  line (`classes/generic.md#Heading`; `classes.py list` prints it and refuses
+  a target that is not a class) — all before any body text,
+  citing `doc.md#Heading` (knowledge `docs/en/`), `ADR-NNN` or `origin:FILE.md#Block`, several
   separated by commas — the split happens only before the next reference, so
   headings may contain commas. Class references elsewhere are
   `classes/<file>.md#<Heading>` verbatim; a test checks that the fixtures'
   references resolve to shipped classes and that SKILL.md names every class
-  file. Keep each file under 8 KB (`classes.py size`); the hunter prompt
+  file. Keep each file under 16 KB (`classes.py size`); the hunter prompt
   pastes the selected classes verbatim.
 - **SKILL.md's vocabulary is closed**: a test parses every `<script>.py
   <subcommand>` mention and checks it against the script's `--help`, and

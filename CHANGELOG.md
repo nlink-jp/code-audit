@@ -74,11 +74,29 @@
   text made inert and identifiers matched whole; the ledger state-machine
   holes closed (pending-candidate reassignment, blocked units, class
   references, suppressed claims, candidate coverage ids); SKILL.md completed
-  on the fourteen points the parent would have stopped at; the hunting
+  on the thirteen points the parent would have stopped at (plus the sub-agent launch rule and the generic-class exclusion); the hunting
   classes rewritten to their sources, with `origin:` as a third source kind
   (user decision 2026-11-08: borrow the origin skill's generic lenses in our
   own words where the organization has little recorded knowledge); pins for
-  the eighteen controls the mutation review found unpinned. 77 tests.
+  the eighteen controls the mutation review found unpinned.
+- Second independent verification round (over the cut-4 fixes) and cut (5),
+  its adopted findings: the budget changes only through `approve`; `assign`
+  counts the hunter and the reserve counts in-progress units; a record keeps
+  the queued candidate's coverage ids and the cross-check requires each to
+  have claimed the fingerprint; only real digests count (a missing, linked or
+  oversized file is refused, two markers never compare unchanged); no line
+  breaks in the command ledger and the log header takes its first values; a
+  re-decision reaches archived attempts; `set-status complete` runs both
+  validators and refuses blocked and budget-deferred units; used agent ids
+  come from the whole run (`count --agent`, critics, notes, replacements);
+  priors deduplicated, read oldest first, a carried claim leaves suppressed,
+  changed-source prior records reported; stderr made inert; the unversioned
+  name, the commondir predicate, an output inside the target by name and an
+  existing-file output handled. Classes: `Refines:` lines the scripts read
+  replace the prose, generic.md carries no sentence of the origin verbatim,
+  the one unsourced sentence cites its heading, bars and dispositions
+  settled. SKILL.md counts every launch when it happens and wraps every
+  target-derived input. 89 tests.
 
 ### Planned for 0.1.0
 

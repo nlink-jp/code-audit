@@ -182,7 +182,7 @@ and the parent never runs them.
   generic classes (injection, access control, resource/file handling, crypto,
   business logic, feature abuse, chained, wildcard, obvious things), v1 ships
   dedicated classes for three organization product types. Each class carries a
-  source: either a knowledge document name plus heading, or an organization
+  source: a knowledge document name plus heading, an organization
   ADR number, with the kind recorded in the class.
 
   | File | Product type | Example source lessons |
@@ -311,7 +311,7 @@ review cuts.
    absent from or forbidden by the ledger.
 2. **The quick flow**: the hunting classes (one generic file and three
    organization files, each class with source and kind; `classes.py size`
-   keeps each file around 8 KB) and SKILL.md: adversarial-input discipline at
+   keeps each file under 16 KB) and SKILL.md: adversarial-input discipline at
    the top, guidance vs full audit with the one question for ambiguous
    requests, the six phases (reconnaissance → hunting waves → candidate
    validation → structured output → independent re-verification → report), the
@@ -373,7 +373,7 @@ independent pass), it sits beside compliance-review and incident-review.
   unit of cost. Whether sub-agent cost can be read in tokens is unverified; if
   not, it is estimated from reconnaissance measurements.
 - **Hunter prompt size**: the reference pastes class bodies verbatim. Keep each
-  class file around 8 KB and paste only the selected classes.
+  class file under 16 KB and paste only the selected classes.
 - **claude.ai chat surface**: no Agent tool, so guidance mode only. The
   SKILL.md `description` must be at most 1,024 characters (registration refuses
   longer; `make check` stops it). gem-agent reads the same limit.
@@ -480,7 +480,7 @@ independent pass), it sits beside compliance-review and incident-review.
   git-dirs refused, prior runs validated / findings cross-checked with the
   ledger, decided records only in reports / approval, budget, agent
   uniqueness and log validity held by the scripts / inert output,
-  `fullmatch`, repo name by shape / state-machine holes / fourteen SKILL.md
+  `fullmatch`, repo name by shape / state-machine holes / thirteen SKILL.md
   points / class fidelity / pins for the eighteen unpinned controls. User
   decision (same day): borrow the origin's know-how in our words for generic
   areas where the organization has little recorded knowledge, with `origin:`
@@ -488,3 +488,9 @@ independent pass), it sits beside compliance-review and incident-review.
   classes are pasted, so file size does not drive cost). Deferred: ten new
   classes, bundling a sub-agent definition. Next: a second independent
   verification pass over the fixes.
+- **2026-11-08 cut (5) (adopted round-two findings)**: triage S1–S19 and
+  T1–T8 applied (deferred: S17, the carried re-check turning a unit into a
+  candidate; T9, overlap between product-type classes). The verification
+  rounds stop here: round two found no high defect in the scripts and the
+  weight dropped (risk assessment over perfection). Next: E2E on real
+  repositories.

@@ -1393,6 +1393,38 @@ class CompileTests(RunFixture):
         self.assertEqual(run_module.repo_name_from({"remote.origin.url": "https://x/a b/na me.git"}, self.target), "target")
         self.assertEqual(run_module.repo_name_from({}, self.tmpdir / "we ird\x1bname"), "we-ird-name")
 
+    def test_round_two_pins(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        import _contract as contract  # noqa: E402
+        import ledger as ledger_module  # noqa: E402
+        # m6: control characters in dict keys are refused too
+        self.assertTrue(any("U+001B" in e for e in contract.forbidden_char_errors({"k\x1b": "v"}, "x")))
+        # m1: used ids include check owners and archived attempts' owners
+        units = [{"agent_id": None, "attempts": [{"agent_id": "hunter-1", "checks": [{"agent_id": "hunter-1"}]}], "checks": [{"agent_id": "hunter-9"}]}]
+        self.assertEqual(ledger_module.used_agent_ids(units), {"hunter-1", "hunter-9"})
+        # m5: approve --budget 0
+        self.hunt()
+        self.refused(run("run.py", "approve", str(self.run_dir), "--budget", "0"), "positive integer")
+        # m2: a log of a command that could not start is not evidence
+        (self.run_dir / "checks" / "nostart.log").write_text("command_id: nostart\nargv: ['nope']\ncwd: .\nenv_allow: []\ntimeout_sec: 5\ntimed_out: False\nexit_code: None\nduration_sec: 0.0\nsource: x\n\n--- stdout ---\n\n--- stderr ---\ncould not start\n", encoding="utf-8")
+        self.assertIn("did not run to completion", ledger_module.check_log_problem(self.run_dir, "checks/nostart.log"))
+        # m7: complete with only pending candidates left (units all in evidence states)
+        self.refused(run("run.py", "set-status", str(self.run_dir), "complete"), "undecided candidate")
+        # m3 / m4: cross_check catches a record citing a coverage id outside the ledger, and a decision without a record
+        rec = self.candidate_record(0)
+        cands = json.loads((self.run_dir / "candidates.json").read_text(encoding="utf-8"))
+        errors = ledger_module.cross_check([dict(rec, coverage_ids=["ghost-unit"])], self.ledger(), dict(cands, decided=[{"fingerprint": rec["fingerprint"], "verdict": "confirmed"}], candidates=[]))
+        self.assertTrue(any("is not in the ledger" in e for e in errors), errors)
+        errors = ledger_module.cross_check([], self.ledger(), dict(cands, decided=[{"fingerprint": rec["fingerprint"], "verdict": "confirmed"}], candidates=[]))
+        self.assertTrue(any("no record in findings.json" in e for e in errors), errors)
+        # m14: an archived attempt with the same owner as the live assignment is invalid
+        units = self.ledger()
+        u = next(x for x in units if x["status"] == "candidate")
+        u["attempts"].append({"wave": 1, "status": "covered", "agent_id": u["agent_id"], "reviewed_paths": [], "checks": [], "result_fingerprints": [], "unresolved": [], "reassignment_reason": "x"})
+        u["wave"] = 2
+        errors = ledger_module.validate_ledger(self.run_dir, units, cands)
+        self.assertTrue(any("fresh owner" in e for e in errors), errors)
+
 
 class ClassesTests(unittest.TestCase):
     def test_list_parses_headings_and_sources(self) -> None:
