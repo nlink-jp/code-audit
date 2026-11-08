@@ -28,5 +28,8 @@ The workflow design of this skill (three-way verdicts, adversarial
 validation, coverage ledger, prior-run carry-over, budget gate, reports
 derived from records) is derived from cloudflare/security-audit-skill
 (https://github.com/cloudflare/security-audit-skill), MIT License,
-Copyright (c) 2025-2026 Cloudflare, Inc. No code or text from that
-repository is included here; the design was re-implemented.
+Copyright (c) 2025-2026 Cloudflare, Inc. No code and no verbatim text from
+that repository is included here; the design was re-implemented, and the
+generic hunting classes (code-audit/classes/generic.md) restate its
+attack-class lenses in this project's own words, each citing its block as an
+`origin:` source.

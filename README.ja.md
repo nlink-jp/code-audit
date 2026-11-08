@@ -75,9 +75,20 @@ make install
 
 狩りクラス（`code-audit/classes/`）: 全リポジトリ向けの `generic.md` と、
 製品型ごとの `mcp-server.md`・`cli.md`・`agent-runtime.md`。各クラスは
-組織が教訓を記録した場所（knowledge の見出し、または ADR）を出典に持ち、
-`classes.py check-knowledge --knowledge <dir> [--adr <dir>]` がチェックアウト
-に対して出典を検査します。
+教訓の記録場所を出典に持ちます。組織の knowledge の見出し、組織の ADR、
+そして自組織にナレッジの薄い汎用分野については、設計の由来である
+スキル（origin）の該当ブロックを自分たちの言葉で書き直したもの。
+`classes.py check-knowledge --knowledge <dir> [--adr <dir>] [--origin <dir>]`
+が全出典をチェックアウトに対して検査します。
+
+スクリプトが守るもの（手順が守らなくてよいもの）: 利用者の承認を
+`run.py approve` で記録するまで、また批評者と検証者の予備枠を割り込むときは、
+ハンターを割り当てられない。findings には台帳が持つ主張のレコードしか入らず、
+両方の validate が相互に照合する。走らなかったテストのログは根拠にならない。
+場所は名前ではなく identity で比べる。報告書に出る値はすべて先に無害化する。
+残余リスクは RFP に記載: 対象自身のテストはサンドボックスなしに利用者の権限で
+走る。サブエージェントに本当にシェルが無いかは、ランタイムが提供する
+エージェント種別に依る。
 
 ## 開発
 
@@ -87,8 +98,8 @@ make package    # dist/code-audit-vX.Y.Z.zip（zip ルート = スキルフォ�
 ```
 
 同梱スクリプトは標準ライブラリだけの Python 3.9 以上です（各 `--help`）。
-`run.py`（実行メタデータと対象の既存テストの有界実行）、`ledger.py`
-（網羅台帳と候補の待ち行列）、`findings.py`（所見レコードと覚え書き）、
+`run.py`（実行メタデータ・承認・対象の既存テストの有界実行）、`ledger.py`
+（網羅台帳と候補の待ち行列）、`findings.py`（所見レコード・digest・覚え書き）、
 `compile.py`（報告書）、`classes.py`（狩りクラスの検査）。貢献者と
 エージェント向けの規則は [`CLAUDE.md`](CLAUDE.md) と [`AGENTS.md`](AGENTS.md)。
 
@@ -96,8 +107,10 @@ make package    # dist/code-audit-vX.Y.Z.zip（zip ルート = スキルフォ�
 
 ワークフローの設計は
 [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)
-（MIT）に由来します。コードや文章は含めず、組織の規約のもとで再実装
-しました。[`LICENSE`](LICENSE) の第三者表記を参照してください。
+（MIT）に由来します。コードや原文のままの文章は含めず、組織の規約のもとで
+再実装しました。汎用の狩りクラスは、その攻撃クラスの観点を自分たちの言葉で
+書き直し、由来のブロックを `origin:` 出典として引いています。
+[`LICENSE`](LICENSE) の第三者表記を参照してください。
 
 ## ライセンス
 

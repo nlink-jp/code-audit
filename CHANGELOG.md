@@ -63,11 +63,26 @@
   verdict, severity, confidence or evidence kind is refused until
   `--confirmed-by` names a different fresh verifier; every replacement is
   logged in `replacements.json` and counted in the report. `ledger.py decide`
-  accepts a re-decision after a verdict-changing replacement. 52 tests.
+  accepts a re-decision after a verdict-changing replacement.
+- Pre-release independent verification (first round, 2026-11-08; triage in
+  `docs/{ja,en}/reviews/2026-11-08-pre-release-verification*.md`) and cut
+  (4), its adopted findings: places compared by identity, link-free bounded
+  digests, foreign git-dirs refused, prior runs validated; findings bound to
+  the ledger with a cross-check in both validators and decided-only reports;
+  the cost gate, agent freshness and evidence-log validity enforced by the
+  scripts (`run.py approve`, `run.py nonce`, `findings.py digest`); report
+  text made inert and identifiers matched whole; the ledger state-machine
+  holes closed (pending-candidate reassignment, blocked units, class
+  references, suppressed claims, candidate coverage ids); SKILL.md completed
+  on the fourteen points the parent would have stopped at; the hunting
+  classes rewritten to their sources, with `origin:` as a third source kind
+  (user decision 2026-11-08: borrow the origin skill's generic lenses in our
+  own words where the organization has little recorded knowledge). 71
+  tests.
 
 ### Planned for 0.1.0
 
-Phase 3: end-to-end runs on two organization repositories (one MCP server,
-one CLI) with invocations, tokens and cost recorded against the estimate;
-the pre-release independent verification pass; release per the organization
-checklist.
+Phase 3: a second independent verification pass over the cut-4 fixes;
+end-to-end runs on two organization repositories (one MCP server, one CLI)
+with invocations, tokens and cost recorded against the estimate; release per
+the organization checklist.

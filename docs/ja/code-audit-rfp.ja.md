@@ -55,11 +55,11 @@ built-in の `/security-review` は差分に限られる。knowledge の securit
 
 | スクリプト | サブコマンド | 役割 |
 |-----------|------------|------|
-| `scripts/run.py` | `init` / `set-budget` / `count` / `set-status` / `validate` / `exec` | `run-metadata.json` の生成、承認した予算と呼び出し回数の実績、状態遷移（`in_progress` → `complete` / `incomplete` と理由）。`exec` はコマンド台帳にある許可コマンドだけを、空の環境＋許可リストの変数・対象ディレクトリ・時間上限で実行し、出力を `checks/<id>.log` に書く |
-| `scripts/ledger.py` | `seed [--prior]` / `assign` / `record` / `merge-critic` / `decide` / `defer` / `estimate` / `validate` / `status` | 網羅台帳の生成（`--prior` からの持ち越し: `prior_status` 付与、同一ソースの confirmed / needs_validation を候補へ、同一ソースの rejected を抑止一覧へ）・割当・ハンター結果の反映・批評結果の統合・検証者判定の反映・予算切れの `deferred` 化・見積もり・検証。`coverage_id` の導出と状態機械はここだけが知る |
-| `scripts/findings.py` | `validate` / `add` / `note` | `findings.json` の構造と意味の検証（3 値の排他、severity ≤ impact、source のみの根拠に対する confidence 上限、trace の順序、fingerprint の一意と整列、blockers が 1 件以上）。`add` は record を 1 件ずつ追加し、親が JSON 全体を書き直さない。`--target` を与えると引用パスの digest を現物と照合し、古い record を拒む。`note` は範囲外の観察を `notes.json` に入れる |
+| `scripts/run.py` | `init` / `approve` / `nonce` / `set-budget` / `count` / `set-status` / `validate` / `exec` | `run-metadata.json` の生成、費用ゲートの承認と予算の記録（`approve`。記録されるまで `ledger.py assign` はハンターを割り当てない）、対象由来テキストを包むタグのノンス（`nonce`）、呼び出し回数の実績、状態遷移（`in_progress` → `complete` / `incomplete` と理由。`complete` は未処理が残っていると拒む）。`exec` はコマンド台帳にある許可コマンドだけを、空の環境＋許可リストの変数・対象ディレクトリ・時間上限で実行し、出力を `checks/<id>.log` に書く |
+| `scripts/ledger.py` | `seed [--prior]` / `assign` / `record` / `merge-critic` / `decide` / `defer` / `abandon` / `estimate` / `validate` / `status` | 網羅台帳の生成（`--prior` からの持ち越し: `prior_status` 付与、同一ソースの confirmed / needs_validation を候補へ、同一ソースの rejected を抑止一覧へ）・割当・ハンター結果の反映・批評結果の統合・検証者判定の反映・予算切れの `deferred` 化・見積もり・検証。`coverage_id` の導出と状態機械はここだけが知る |
+| `scripts/findings.py` | `validate` / `add [--replace --by [--confirmed-by]]` / `digest` / `note` | `findings.json` の構造と意味の検証（3 値の排他、severity ≤ impact、source のみの根拠に対する confidence 上限、trace の順序、fingerprint の一意と整列、blockers が 1 件以上）と、台帳との相互照合（record は台帳が持つ主張のものだけ、判定と一致）。`add` は record を 1 件ずつ追加し、親が JSON 全体を書き直さない。`--target` を与えると引用パスの digest を現物と照合し、古い record を拒む。`--replace` は置換の規則を守る（強化は別の検証者の `--confirmed-by` が必須、`replacements.json` に記録）。`digest` は record が引用するファイルから `source_digests` を埋める。`note` は範囲外の観察を `notes.json` に入れる |
 | `scripts/compile.py` | （run dir のみ） | `findings.json`・台帳・`candidates.json`・`notes.json` から `REPORT.ja.md` / `REPORT.md` / `NEEDS-VALIDATION.ja.md` / `NEEDS-VALIDATION.md` を導出 |
-| `scripts/classes.py` | `list` / `size` / `check-knowledge --knowledge <dir> [--adr <dir>]` | クラスの解析、容量検査、各クラスの出典（knowledge 文書名＋見出し、または組織 ADR 番号）の存在検査 |
+| `scripts/classes.py` | `list` / `size` / `check-knowledge --knowledge <dir> [--adr <dir>] [--origin <dir>]` | クラスの解析、容量検査（1 ファイル 16 KB 以内。プロンプトには選んだクラスだけを貼る）、各クラスの出典（knowledge 文書名＋見出し、組織 ADR 番号、または origin のブロック名）の存在検査 |
 
 （2026-11-08 の実装時の調整: 持ち越しは `findings.py carry` ではなく
 `ledger.py seed --prior` に置いた。持ち越しは台帳の `prior_status` と候補の
@@ -76,10 +76,13 @@ built-in の `/security-review` は差分に限られる。knowledge の securit
 |---------|-------|------|
 | `run-metadata.json` | `run.py` のみ | run_id、repo 名（git remote 由来。絶対パスは書かない）、source ref と dirty フラグ、profile、budget、呼び出し回数の実績、run_status と理由 |
 | `architecture.md` | 親 | 偵察の要約（約 1,000 語上限） |
+| `proposals.json` | 親 | `seed` に渡す単位の提案 |
+| `agents/<agent-id>.json` | 親 | サブエージェントの返りをそのまま保存したもの。スクリプトはここから読む |
 | `commands.json` | 親（偵察の成果物） | 対象のテスト・検査コマンドの台帳。各行は許可／禁止、禁止理由（網に出る・資格情報を読む・対象の外に書く・依存を取得する）、書込先、時間上限 |
 | `coverage-ledger.json` | `ledger.py` のみ | 網羅台帳。入口 × 境界 × サブシステム × 攻撃クラスの単位と状態、各単位が引用するパスの source digest |
-| `candidates.json` | `ledger.py` のみ | 検証待ちの候補（ハンター提案）、持ち越した record、判定済み、前回 rejected のまま抑止した主張、未割当の面、解決済みの前回の手がかり |
+| `candidates.json` | `ledger.py` のみ | 検証待ちの候補（ハンター提案）、持ち越した record、判定済み、前回 rejected のまま抑止した主張、未割当の面、解決済みの前回の手がかり、今回の単位に結び付かない前回の record |
 | `findings.json` | `findings.py` のみ | `confirmed` / `needs_validation` / `rejected` のレコード。fingerprint で整列。各 record は引用パスの source digest を持つ |
+| `replacements.json` | `findings.py add --replace` | 再検証による置換の記録: 前後の判定、強めた項目、書いた agent、確認した agent |
 | `notes.json` | `ledger.py record` と `findings.py note` | ハンター・検証者が返した範囲外の観察と hardening の覚え書き |
 | `checks/<id>.log` | `run.py exec` のみ | 既存テストの実行記録（コマンド・許可した環境変数名・終了コード・出力） |
 | `REPORT.ja.md`, `REPORT.md` | `compile.py` | 読む人向けの報告書。判定・深刻度・根拠種別・網羅の要約はレコードから導出 |
@@ -166,11 +169,16 @@ commands）。深刻度の較正規則（5 段のアンカーと high/medium の
 
   | ファイル | 製品型 | 出典となる教訓の例 |
   |---------|-------|------------------|
-  | `classes/mcp-server.md` | MCP サーバ | 解決済みパスを確認してから元のパスを開く TOCTOU（security.md）、書けるかを書いて試す検査（security.md）、サーバ由来メタデータを事実として扱う（security.md）、work_dir 契約の外への書き込み（ADR-021 / mcp-server-design.md） |
+  | `classes/mcp-server.md` | MCP サーバ | 解決済みパスを確認してから元のパスを開く TOCTOU（security.md）、書けるかを書いて試す検査（security.md）、他サーバの description や上流の文を自分の言葉として素通しする（security.md）、work_dir 契約の外への書き込み（ADR-021 / mcp-server-design.md） |
   | `classes/cli.md` | Go / Python CLI | 子プロセスへ漏れる環境変数（security.md）、URL や設定の構文エラーに資格情報が乗る（security.md）、設定の黙った既定値への退避（ADR-026 / config-and-io.md）、作ったものではなく計画から掃除する（security.md） |
   | `classes/agent-runtime.md` | LLM エージェントランタイム | 自己承認、拒否フラグに鍵付けした守り、エージェントが書ける永続メモリ、「人間しか書かない」前提の権限、緩められる制約は権限（いずれも security.md） |
 
-  knowledge が出典であり、スキルは写しを持つ。写しを作る日に検査も作る:
+  汎用クラス（generic.md）は、自組織にナレッジの薄い分野について参考元
+  （cloudflare/security-audit-skill, commit c1c8a8c）の攻撃クラスの観点を
+  自分たちの言葉で書き直し、`origin:<file>#<block>` を第 3 の出典種別として
+  引く（利用者の判断、2026-11-08。knowledge に移す案は、knowledge の性格が
+  自組織の欠陥史であるため不採用）。帰属は LICENSE と README に記す。
+  knowledge（と origin）が出典であり、スキルは写しを持つ。写しを作る日に検査も作る:
   `classes.py check-knowledge` は `--knowledge <dir>` が与えられたときだけ
   走り、無ければ飛ばす（単独クローンの `make check` は knowledge に依存
   しない、ADR-006 の理由）。knowledge の教訓が増えたらリリースで追随する。

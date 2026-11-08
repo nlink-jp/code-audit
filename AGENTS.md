@@ -12,19 +12,21 @@ coverage ledger and a human-approved cost gate. Hunting classes come from the
 organization's recorded defects (MCP servers, CLIs, LLM agent runtimes)
 beside generic classes. Invoked as `/code-audit <target-dir> ...`.
 
-**Status: Phase 1 complete (cuts 1–3), not released.** The five bookkeeping
-scripts, the data contracts, the four hunting-class files (52 classes, every
-source verified against the knowledge checkout and the ADR directory on
+**Status: Phase 1 complete (cuts 1–4), not released.** The five bookkeeping
+scripts, the data contracts, the four hunting-class files (52 classes, 123
+citations verified against the knowledge, ADR and origin checkouts on
 2026-11-08) and the six-phase SKILL.md for both profiles exist and are
-tested over the fixture repository. Phase 3 (E2E on two real repositories
-with cost recorded, the pre-release independent verification pass, the
-v0.1.0 release) has not started.
+tested over the fixture repository. The first pre-release independent
+verification ran on 2026-11-08 and its adopted findings are applied (cut 4;
+triage in `docs/{ja,en}/reviews/`). Left for Phase 3: a second verification
+pass over the fixes, E2E on two real repositories with cost recorded, the
+v0.1.0 release.
 
 ## Key commands
 
 | Command | Purpose |
 |---------|---------|
-| `make check` (= `make test`) | Structural validation + script behaviour tests (52 tests) |
+| `make check` (= `make test`) | Structural validation + script behaviour tests (71 tests) |
 | `make install` | Build the zip and unpack it into `~/.claude/skills/code-audit` |
 | `make install DEST=<path>` | Unpack into a custom skills directory |
 | `make uninstall` | Remove the installed copy |
@@ -35,11 +37,11 @@ Bundled scripts (stdlib-only Python 3.9+; `--help` on each):
 
 | Script | Subcommands | Owns |
 |--------|-------------|------|
-| `run.py` | `init`, `set-budget`, `count`, `set-status`, `validate`, `exec` | `run-metadata.json`, `checks/<id>.log` |
+| `run.py` | `init`, `approve [--budget N]`, `nonce`, `set-budget`, `count`, `set-status`, `validate`, `exec` | `run-metadata.json`, `checks/<id>.log` |
 | `ledger.py` | `seed [--prior]`, `assign`, `record`, `merge-critic`, `decide`, `defer`, `abandon`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json` (and appends hunter notes to `notes.json`) |
-| `findings.py` | `validate`, `add [--replace --by <agent> [--confirmed-by <agent>]]`, `note` | `findings.json`, `replacements.json`, `notes.json` |
+| `findings.py` | `validate`, `add [--replace --by <agent> [--confirmed-by <agent>]]`, `digest`, `note` | `findings.json`, `replacements.json`, `notes.json` (`digest` writes back the record file it is given) |
 | `compile.py` | (run dir) | `REPORT.ja.md`, `REPORT.md`, `NEEDS-VALIDATION.ja.md`, `NEEDS-VALIDATION.md` |
-| `classes.py` | `list`, `size`, `check-knowledge [--adr]` | nothing; checks `classes/*.md` |
+| `classes.py` | `list`, `size`, `check-knowledge [--adr] [--origin]` | nothing; checks `classes/*.md` |
 
 ## Directory structure
 
@@ -124,10 +126,55 @@ code-audit/
 - **`decide` requires the record first** (`findings.py add`), then links the
   fingerprint to units; a carried record on a still-planned unit needs
   `--agent` (the verifier becomes the owner).
+- **The cost gate is a fact of the books.** `run.py approve` records the
+  approval and the budget (the estimate's total when none was given);
+  `ledger.py assign` refuses every hunter before it, and one that would
+  spend what `estimate_numbers` reserves for critics and verifiers. Agent
+  ids are used once per run (`used_agent_ids`); `assign` and `decide
+  --agent` refuse a used one.
+- **findings ⇄ ledger coherence.** `findings.py add` takes a record only for
+  a pending candidate (or, with `--replace`, a decided one) whose coverage
+  ids exist, and keeps coverage ids unchanged on replacement; `ledger.py
+  validate` and `findings.py validate <run-dir>` run `cross_check` (every
+  record decided with the ledger's verdict, every decision with its record);
+  `compile.py` reports only decided records and lists the rest without a
+  verdict. Carried prior records with no current unit go to
+  `candidates.unlinked_prior`, never to the queue.
+- **Places are compared by identity.** `_contract.is_inside` / `same_place`
+  walk from the nearest existing ancestor and compare device and inode, so
+  another case or Unicode spelling of the target cannot put the output
+  inside it (reproduced before the fix). `digests_for` follows no link in
+  any path component (`lstat_no_links`), refuses non-relative keys, skips
+  caches and `.git`, and stops at `DIGEST_LIMITS`. A `.git` link or a gitdir
+  outside the target that does not point back at it makes the target
+  `unversioned`. Prior-run units and records are validated and dropped with
+  a warning when they fail.
+- **Everything printed is inert.** `compile.plain` strips Unicode category C
+  and `code()` keeps backticks out of code spans; `forbidden_char_errors`
+  refuses control characters in records, sub-agent returns, proposals and
+  notes on entry; anchored schema patterns and the id rules match whole
+  strings (`re.fullmatch`), so a trailing newline is not a second
+  identifier; the repo name is taken from the remote URL only by shape.
+- **Evidence logs are read, not just found.** `check_log_problem` reads the
+  header of a `checks/` log: `timed_out: True` or `exit_code: None` means the
+  command never ran, and the log is refused as `existing_test` evidence.
+- **Class references are closed.** `build_unit` refuses an attack class or
+  excluded block that names no shipped class (`known_class_refs`). A
+  `Source:` may also be `origin:<file>#<block>` (cloudflare/security-audit-
+  skill at c1c8a8c, bold class names count as headings; user decision
+  2026-11-08); `check-knowledge --origin <clone>` verifies them. Files may
+  be up to 16 KB; only the selected classes are pasted into a prompt.
 - **A discarded hunter result has one exit: `ledger.py abandon`.** It
   archives the attempt (status `in_progress`, the reason) and returns the
   agent's units to `planned`; `assign` then refuses that agent, so the unit
-  gets a fresh owner or a `defer`. `defer` itself takes planned units only.
+  gets a fresh owner or a `defer`. `defer` takes planned and blocked units
+  (a blocked unit's evidence is archived with the reason). A critic cannot
+  reassign a unit whose candidates are still pending; an archived attempt
+  keeps its `decisions`. `record` does not queue a claim a prior run
+  rejected with unchanged sources (`suppressed_candidates`), refuses a
+  candidate that carries `verdict` beside `proposed_verdict`, and requires
+  its `coverage_ids` to include every unit that lists the fingerprint.
+  `status` returns the `uncovered` entries and the `blocked` units' facts.
 - **The replacement rule is enforced, not described.** `findings.py add
   --replace` needs `--by <agent>`; it ranks the old and new record on verdict
   (rejected < needs_validation < confirmed), `severity.overall`, `impact`,

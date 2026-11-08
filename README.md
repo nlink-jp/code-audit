@@ -85,10 +85,22 @@ every unit carries what the last run concluded for it.
 
 Hunting classes (`code-audit/classes/`): `generic.md` for every repository
 and one file per product type — `mcp-server.md`, `cli.md`,
-`agent-runtime.md`. Each class cites where the organization recorded the
-lesson (a heading of the knowledge base or an ADR); `classes.py
-check-knowledge --knowledge <dir> [--adr <dir>]` verifies the citations
-against a checkout.
+`agent-runtime.md`. Each class cites where its lesson is recorded: a heading
+of the organization's knowledge base, an organization ADR, or — for the
+general know-how the organization has not had to learn the hard way — a
+block of the origin skill, restated in our words. `classes.py
+check-knowledge --knowledge <dir> [--adr <dir>] [--origin <dir>]` verifies
+every citation against the checkouts.
+
+What the scripts hold, so the workflow does not have to: no hunter is
+assigned before the human's approval is recorded (`run.py approve`) or past
+the budget reserved for critics and verifiers; a record enters the findings
+file only for a claim the ledger holds, and both validators cross-check the
+two; a log of a test that never ran is not evidence; places are compared by
+identity, not by name; every value the report prints is made inert first.
+Residual risks are in the RFP: the target's own tests run unsandboxed as
+your user, and whether a sub-agent really has no shell depends on the agent
+type the runtime offers.
 
 ## Development
 
@@ -100,16 +112,18 @@ make package    # dist/code-audit-vX.Y.Z.zip (zip root = skill folder)
 Bundled scripts are stdlib-only Python 3.9+ (`--help` on each): `run.py`
 (run metadata, bounded execution of the target's existing tests),
 `ledger.py` (coverage ledger and candidate queue), `findings.py` (findings
-records and notes), `compile.py` (reports), `classes.py` (hunting-class
-checks). Rules for contributors and agents: [`CLAUDE.md`](CLAUDE.md),
+records, digests and notes), `compile.py` (reports), `classes.py`
+(hunting-class checks). Rules for contributors and agents: [`CLAUDE.md`](CLAUDE.md),
 [`AGENTS.md`](AGENTS.md).
 
 ## Acknowledgement
 
 The workflow design derives from
 [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)
-(MIT). No code or text from it is included; the design was re-implemented
-under the organization's conventions. See the third-party notice in
+(MIT). No code and no verbatim text from it is included; the design was
+re-implemented under the organization's conventions, and the generic hunting
+classes restate its attack-class lenses in our words, each citing the block
+it derives from as an `origin:` source. See the third-party notice in
 [`LICENSE`](LICENSE).
 
 ## License
