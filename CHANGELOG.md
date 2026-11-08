@@ -166,7 +166,14 @@
   `brief hunter --target` lists the files under each unit's starting paths
   (capped, links unfollowed, `.git` skipped); the replacement log records
   the fields a replacement weakened and the report counts strengthening,
-  weakening and wording replacements apart. 101 tests.
+  weakening and wording replacements apart. Hardening from the commit-time
+  review of the cut: the file listing refuses a starting path that is not
+  repository-relative, has a link in any component or names a vendored
+  tree, and prunes vendored and cache trees while walking; the local-path
+  pattern takes repeated slashes, `/Volumes` and `/private/var/folders`; the
+  login match is case-insensitive; the parent's own `--reason` texts and the
+  unit proposals' prose pass the identifier check; a strengthening
+  replacement that also weakens a field is said so in the report. 102 tests.
 
 ### Planned for 0.1.0
 

@@ -133,3 +133,17 @@ launched. E34: `brief hunter --target TARGET` carries the files under each unit'
 starting paths (cap 400, links by name, `.git` skipped). E35: `findings.py add --replace`
 logs `weakened` and the report's replacement line counts strengthening, weakening and
 wording apart.
+
+Commit-time review of the cut (7 findings, all adopted): the file listing followed a
+starting path with a link in a middle component out of the target (the target's own tests
+can plant one after seed) → every component is lstat-ed, a starting path that is not
+repository-relative, holds a link or names a vendored tree is not read, and vendored and
+cache directories are pruned while walking (otherwise they eat the cap of 400 before any
+source file). The path pattern let `file:///Users/…`, `//home/…`, `/private/var/folders/…`
+and `/Volumes/…` through → repeated slashes and two more roots (`~/`, percent-encoding and
+Windows paths are stated as out of scope). The login match ignores case. The parent's own
+`--reason` texts (merge-candidates, defer, abandon, set-status) and `seed`'s proposal prose
+are checked too. A replacement that strengthens one field and weakens another counts as
+strengthening and the weakening is said. SKILL.md states that the login is checked only at
+three characters or more, that hostnames rest on the contract alone, and that a `truncated`
+listing is partial.

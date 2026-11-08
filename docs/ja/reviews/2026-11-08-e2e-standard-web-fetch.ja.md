@@ -113,3 +113,13 @@ E33: standard の見積もりに決定済みレコード 1 件あたり再検証
 E34: `brief hunter --target TARGET` が単位の starting_paths 配下のファイル一覧を運ぶ（上限 400、
 リンクは名前のみ、`.git` は除く）。E35: `findings.py add --replace` が `weakened` を記録し、
 報告書の置換行は強化・弱化・文言を分けて数える。
+
+コミット時のレビュー（7 件、全採用）: ファイル一覧は途中の要素がリンクの starting path を辿って
+対象外へ出られた（対象自身のテストが seed 後にリンクを植えられる）→ 全要素を lstat し、
+対象相対でない・リンクを含む・vendored 名の starting path は読まず、歩行中も vendored /
+キャッシュのディレクトリを刈る（刈らないと 400 の上限を vendored が食い尽くす）。パスの
+正規表現は `file:///Users/…`・`//home/…`・`/private/var/folders/…`・`/Volumes/…` を通して
+いた → スラッシュの繰り返しと 2 つの根を追加（`~/`・%エンコード・Windows は対象外と明記）。
+ログイン一致は大小文字を無視。親が書く `--reason`（merge-candidates・defer・abandon・
+set-status）と `seed` の提案文も検査。強化と弱化を同時に含む置換は強化として数え、弱化も添える。
+SKILL は「ログインは 3 文字以上のとき・ホスト名は契約文だけ」「`truncated` なら一覧は部分」と明記。
