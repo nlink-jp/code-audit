@@ -189,10 +189,19 @@ class RunFixture(unittest.TestCase):
         path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         return path
 
-    def seed(self, *extra: str, approve: bool = True) -> dict:
+    def architecture(self, run_dir: Path | None = None) -> dict:
+        """Save the fixture reconnaissance return and compose architecture.md (E21)."""
+        run_dir = run_dir or self.run_dir
+        (run_dir / "agents").mkdir(exist_ok=True)
+        shutil.copy(FIXTURES / "recon-a.json", run_dir / "agents" / "recon-a.json")
+        return self.ok(run("ledger.py", "architecture", str(run_dir)))
+
+    def seed(self, *extra: str, approve: bool = True, architecture: bool = True) -> dict:
         out = self.ok(run("ledger.py", "seed", str(self.run_dir), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), *extra))
         if approve:
             self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "40"))
+        if architecture:
+            self.architecture()
         return out
 
     def hunt(self) -> dict:
@@ -859,6 +868,9 @@ class LedgerTests(RunFixture):
         self.assertEqual([x["fingerprint"] for x in brief["pending_candidates"]], [keep, "app/files.py:list_user_files:enumeration"])
         self.assertEqual(brief["merged"][0]["into"], keep)
         self.assertIn("invariant", brief["units"][0]["checks"][0])
+        # E22 (E2E run 3): the queue holds the proposal as `verdict`; the brief says so and carries the root cause
+        self.assertEqual(brief["pending_candidates"][0]["proposed_verdict"], "confirmed")
+        self.assertTrue(brief["pending_candidates"][0]["root_cause"])
         self.refused(run("ledger.py", "brief", str(self.run_dir), "critic", "--fingerprint", keep), "takes no --fingerprint")
         # the verifier's brief is the candidate without the queue's agent id, its units and the logs
         self.refused(run("ledger.py", "brief", str(self.run_dir), "verifier"), "needs --fingerprint")
@@ -866,6 +878,13 @@ class LedgerTests(RunFixture):
         vb = self.ok(run("ledger.py", "brief", str(self.run_dir), "verifier", "--fingerprint", keep))
         self.assertNotIn("agent_id", vb["candidate"])
         self.assertEqual(vb["candidate"]["fingerprint"], keep)
+        self.assertEqual(vb["candidate"]["proposed_verdict"], "confirmed")
+        self.assertNotIn("verdict", vb["candidate"])
+        # E24: the required fields per verdict come from the schema, not from the parent's memory
+        self.assertIn("reason", vb["required_fields"]["finding_rejected"])
+        self.assertIn("evidence", vb["required_fields"]["finding_rejected"])
+        self.assertIn("blockers", vb["required_fields"]["finding_needs_validation"])
+        self.assertIn("inside TARGET", vb["file_rule"])
         self.assertEqual([u["coverage_id"] for u in vb["units"]], [u1])
         log = next(x for x in vb["check_logs"] if x["command_id"] == "unit-tests")
         self.assertEqual((log["check_log"], log["timed_out"], log["is_evidence"]), ("checks/unit-tests.log", "False", True))
@@ -1032,6 +1051,8 @@ class LedgerTests(RunFixture):
         est = self.ok(run("ledger.py", "estimate", str(self.run_dir), "--tokens-per-invocation", "50000"))
         # E5 (E2E 2026-11-08): two planned units are one hunter; re-asks are budgeted
         self.assertEqual((est["hunters"], est["units_per_hunter"], est["critics"], est["verification_stages"]), (1, 3, 3, 2))
+        # E26 (three E2E runs): per-profile candidate rate and the measured re-ask rate
+        self.assertEqual((est["candidates_per_unit"], est["rerun_rate"]), (0.30, 0.15))
         self.assertEqual(est["total_invocations"], est["spent"] + est["hunters"] + est["critics"] + est["verifiers"] + est["reruns"])
         self.assertGreaterEqual(est["reruns"], 1)
         self.assertEqual(est["tokens_estimate"], est["total_invocations"] * 50000)
@@ -1058,6 +1079,59 @@ class LedgerTests(RunFixture):
         self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1), "fresh owner")
         self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-2", u1))
         self.ok(run("ledger.py", "defer", str(self.run_dir), "--reason", "budget", u2))
+
+
+    def test_architecture_is_composed_from_the_recon_returns_and_required_by_brief(self) -> None:
+        # E21 (E2E run 3, 2026-11-08): the parent skipped architecture.md and
+        # pasted a summary into the hunter prompts; now a script composes it
+        # and no brief is printed without it.
+        self.seed(architecture=False)
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1, u2))
+        self.refused(run("ledger.py", "brief", str(self.run_dir), "hunter", "--agent", "hunter-1"), "architecture.md is missing")
+        self.refused(run("ledger.py", "architecture", str(self.run_dir)), "no reconnaissance return")
+        (self.run_dir / "agents").mkdir(exist_ok=True)
+        shutil.copy(FIXTURES / "recon-a.json", self.run_dir / "agents" / "recon-a.json")
+        bad = {"agent_id": "recon-b", "summary": "principals", "principals": [{"who": "operator", "where": "/Users/someone/works/app/files.py"}]}
+        self.write_json(bad, "recon-b.json")
+        shutil.copy(self.tmpdir / "recon-b.json", self.run_dir / "agents" / "recon-b.json")
+        self.refused(run("ledger.py", "architecture", str(self.run_dir)), "absolute local path")
+        self.assertFalse((self.run_dir / "architecture.md").exists())
+        (self.run_dir / "agents" / "recon-b.json").unlink()
+        out = self.ok(run("ledger.py", "architecture", str(self.run_dir)))
+        self.assertEqual((out["written"], out["sources"]), ("architecture.md", ["recon-a"]))
+        text = (self.run_dir / "architecture.md").read_text(encoding="utf-8")
+        self.assertIn("## recon-a", text)
+        self.assertIn("A small file service", text)
+        self.assertIn("- **product_types**:", text)
+        self.assertIn("read_user_file", text)
+        self.assertNotIn("agent_id", text)
+        hb = self.ok(run("ledger.py", "brief", str(self.run_dir), "hunter", "--agent", "hunter-1"))
+        self.assertEqual(len(hb["units"]), 2)
+
+    def test_invalid_json_is_refused_with_its_position_and_context(self) -> None:
+        # E23 (E2E run 3): three returns had unbalanced braces; the re-ask quotes the spot
+        self.hunt()
+        text = self.fill("hunter-result.json").read_text(encoding="utf-8").rstrip() + "}"
+        bad = self.tmpdir / "bad.json"
+        bad.write_text(text, encoding="utf-8")
+        proc = run("ledger.py", "record", str(self.run_dir), str(bad))
+        self.refused(proc, "invalid JSON")
+        self.assertIn("near: ...", proc.stderr)
+        self.assertIn("}}...", proc.stderr.replace(" ", "").replace("\n", ""))
+
+    def test_estimate_subtracts_launched_critics_and_uses_the_pending_queue_after_hunting(self) -> None:
+        # E25 (E2E run 3): after the critic launched the estimate still reserved
+        # one, and it rounded the known queue up by one.
+        summary = self.hunt()
+        est = self.ok(run("ledger.py", "estimate", str(self.run_dir)))
+        self.assertEqual(est["expected_candidates"], len(summary["queued_candidates"]))
+        self.assertEqual(est["hunters"], 0)
+        self.assertEqual(est["critics"], 3)
+        self.ok(run("run.py", "count", str(self.run_dir), "critic", "--agent", "critic-1"))
+        est = self.ok(run("ledger.py", "estimate", str(self.run_dir)))
+        self.assertEqual(est["critics"], 2)
+        self.assertEqual(est["total_invocations"], est["spent"] + est["critics"] + est["verifiers"] + est["reruns"])
 
 
 class FindingsTests(RunFixture):
@@ -1317,6 +1391,7 @@ class PriorRunTests(RunFixture):
         self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
         out = self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
         self.assertEqual(out["prior_leads"], 1)
+        self.architecture(run2)
         brief = self.ok(run("ledger.py", "brief", str(run2), "critic"))
         self.assertEqual((brief["prior_leads"][0]["agent_id"], brief["prior_leads"][0]["prior_run"]), ("verifier-5", "run-1"))
         # E14: a unit the critic adds to a run with priors is `new`, not `none`

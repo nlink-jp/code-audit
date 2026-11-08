@@ -54,7 +54,11 @@ def read_json(path: Path) -> object:
     except FileNotFoundError:
         die(f"{path}: not found")
     except json.JSONDecodeError as exc:
-        die(f"{path}: invalid JSON: {exc}")
+        # E23 (E2E 2026-11-08): a malformed return is re-asked with the
+        # position and its surroundings, so print them (made inert) here.
+        text = exc.doc or ""
+        lo, hi = max(0, exc.pos - 60), min(len(text), exc.pos + 60)
+        die(f"{path}: invalid JSON: {exc}; near: ...{inert(text[lo:hi])}...")
 
 
 def write_json(path: Path, data: object) -> None:

@@ -1,0 +1,37 @@
+{
+  "agent_id": "recon-a",
+  "summary": "A small file service: app/files.py reads and lists files under a per-user directory, with one test module under tests/.",
+  "product_types": [
+    {
+      "type": "cli",
+      "evidence": "app/files.py:1 exposes read_user_file and list_user_files to a caller-chosen user id"
+    }
+  ],
+  "stack": {
+    "language": "Python 3",
+    "framework_or_libraries": [
+      "standard library"
+    ],
+    "build": "none",
+    "release": "none"
+  },
+  "commands": [
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests"
+      ],
+      "cwd": ".",
+      "source": "tests/",
+      "needs_network": false,
+      "reads_credentials": false,
+      "writes_outside_target": false,
+      "fetches_dependencies": false,
+      "expected_seconds": 5
+    }
+  ]
+}
