@@ -12,7 +12,7 @@ coverage ledger and a human-approved cost gate. Hunting classes come from the
 organization's recorded defects (MCP servers, CLIs, LLM agent runtimes)
 beside generic classes. Invoked as `/code-audit <target-dir> ...`.
 
-**Status: Phase 1 complete (cuts 1–5), not released.** The five bookkeeping
+**Status: v0.1.0 released 2026-11-09.** The five bookkeeping
 scripts, the data contracts, the four hunting-class files (52 classes, 123
 citations verified against the knowledge, ADR and origin checkouts on
 2026-11-08) and the six-phase SKILL.md for both profiles exist and are
@@ -22,7 +22,7 @@ verification rounds ran on 2026-11-08 and their adopted findings are applied
 second having found no high defect in the scripts. Phase 3: all four E2E
 runs are done with cost recorded (`docs/{ja,en}/reviews/`); cut 8 applied
 the first three runs' lessons and cut 9 the fourth run's (E29–E35; E36
-waits for more measurements). Left is the v0.1.0 release.
+waits for more measurements). Released as v0.1.0 on 2026-11-09.
 
 ## Key commands
 

@@ -4,11 +4,10 @@
 見つけ、どこまで見たかを台帳で示す Claude Code Skill。設計は
 [RFP](docs/ja/code-audit-rfp.ja.md)（英訳: [RFP (en)](docs/en/code-audit-rfp.md)）。
 
-> **状態: 作成中 — Phase 1 は完了、未リリース。** 簿記のスクリプト、
-> データ契約、狩りクラス、6 段の SKILL.md が両プロファイルについて揃い、
-> 見本リポジトリでのテストがあります。Phase 3 は完了: 実リポジトリ 2 つでの
-> 通し実行 4 走（費用を記録、`docs/{ja,en}/reviews/`）と、実装に対する独立検証
-> パス 2 巡と、4 走の学びの区切り。v0.1.0 までに残るのはリリースです。
+> **状態: v0.1.0。** 簿記のスクリプト、データ契約、狩りクラス、6 段の
+> SKILL.md が両プロファイルについて揃い、見本リポジトリでのテストがあります。
+> リリース前に、実リポジトリ 2 つでの通し実行 4 走（費用を記録、
+> `docs/{ja,en}/reviews/`）と、実装に対する独立検証パス 2 巡を経ています。
 
 **何をするか。** 親エージェントが隔離されたサブエージェントで 6 段を回します。
 偵察、網羅台帳に基づく狩りの波、候補ごとに別の新しい検証者が反証を試みる
@@ -29,7 +28,7 @@
 
 ## インストール
 
-[Releases](https://github.com/nlink-jp/code-audit/releases)（まだありません）
+[Releases](https://github.com/nlink-jp/code-audit/releases)
 から `code-audit-vX.Y.Z.zip` を取得し、登録します。
 
 - **アプリで**（Claude Desktop、claude.ai、モバイル）: スキル設定

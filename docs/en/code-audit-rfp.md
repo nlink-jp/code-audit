@@ -553,3 +553,6 @@ independent pass), it sits beside compliance-review and incident-review.
   spell) and a script refusal of the operator's login and absolute local paths
   wherever a return enters the books. E36 waits for more measurements. The
   Phase 3 cuts end here; the release remains.
+- **2026-11-09 v0.1.0 release**: first release after Phase 3's four runs and
+  cut (9); the remote `nlink-jp/code-audit` created and added to the
+  skills-series umbrella as a submodule.

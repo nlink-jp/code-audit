@@ -1,6 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.0] - 2026-11-09
+
+First release: the full six-phase audit for both profiles, after Phase 3's
+four end-to-end runs and nine cuts of lessons.
 
 ### Added
 
@@ -175,8 +178,3 @@
   unit proposals' prose pass the identifier check; a strengthening
   replacement that also weakens a field is said so in the report. 102 tests.
 
-### Planned for 0.1.0
-
-Phase 3's four end-to-end runs are done (`webhook-relay` quick and standard,
-`web-fetch` quick and standard; records in `docs/{ja,en}/reviews/`) and cut 9
-is applied. Left: release per the organization checklist.

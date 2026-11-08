@@ -5,13 +5,11 @@ vulnerabilities that actually cross a trust boundary, and shows what was
 covered in a ledger. Design: the [RFP](docs/en/code-audit-rfp.md)
 (Japanese primary: [RFP (ja)](docs/ja/code-audit-rfp.ja.md)).
 
-> **Status: under construction — Phase 1 complete, not yet released.** The
-> bookkeeping scripts, the data contracts, the hunting classes and the
-> six-phase SKILL.md exist for both profiles, with tests over a fixture
-> repository. Phase 3 is done: four end-to-end runs on two real repositories
-> with the cost recorded (`docs/{ja,en}/reviews/`) and two independent
-> verification rounds over the implementation. What remains before v0.1.0 is
-> the release.
+> **Status: v0.1.0.** The bookkeeping scripts, the data contracts, the
+> hunting classes and the six-phase SKILL.md exist for both profiles, with
+> tests over a fixture repository. Before the release: four end-to-end runs
+> on two real repositories with the cost recorded (`docs/{ja,en}/reviews/`)
+> and two independent verification rounds over the implementation.
 
 **What it will do.** The parent agent runs six phases over isolated
 sub-agents: reconnaissance; coverage-led hunting waves; adversarial validation
@@ -36,7 +34,7 @@ approval.
 ## Install
 
 Download `code-audit-vX.Y.Z.zip` from
-[Releases](https://github.com/nlink-jp/code-audit/releases) (none yet), then
+[Releases](https://github.com/nlink-jp/code-audit/releases), then
 register it:
 
 - **In the app** (Claude Desktop, claude.ai, mobile) — add the zip from the

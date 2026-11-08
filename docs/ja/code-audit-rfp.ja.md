@@ -475,3 +475,5 @@ compliance-review / incident-review と並ぶ。
   置換の `weakened` と報告書の種別）。E32 は契約文（綴らず記述）と、帳簿の入口で実行者の
   ログイン・絶対ローカルパスを拒むスクリプトの両方。E36 は実測待ち。Phase 3 の区切りはこれで終わり、
   残りはリリース。
+- **2026-11-09 v0.1.0 リリース**: Phase 3 の 4 走と区切り (9) を経て初版を公開。
+  リモート `nlink-jp/code-audit` を作成し、skills-series の submodule に追加。
