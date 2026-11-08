@@ -241,7 +241,12 @@ def forbidden_char_errors(value: object, path: str) -> list[str]:
 # audit path in their returns. The artifacts are meant for a shared records
 # repository, so a return that spells the operator's login or an absolute
 # local path is refused and the agent re-asked to describe, not spell.
-LOCAL_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])/(?:Users|home|root|private/tmp|tmp|var/folders)/[^\s\"'`)]+")
+# One or more slashes (so `file:///Users/...` and `//home/...` count), the
+# usual roots of a user's or a temporary directory on macOS and Linux. Not
+# covered, by design: `~/`, percent-encoded paths, Windows drive letters and
+# Unicode confusables — the contract (describe, never spell) is the control
+# for those, this pattern is the backstop for the common spellings.
+LOCAL_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.-])/+(?:Users|home|root|Volumes|private/(?:tmp|var/folders)|tmp|var/folders)/[^\s\"'`)]+")
 
 
 def operator_login() -> str:
@@ -253,10 +258,14 @@ def operator_login() -> str:
 
 def personal_identifier_errors(value: object, path: str, login: str | None = None) -> list[str]:
     """Absolute local paths and the operator's login, as whole words, anywhere
-    in a return or record. A login shorter than three characters is not
-    checked (it would match ordinary words)."""
+    in a return or record. A login shorter than three characters, or none
+    (no passwd entry), is not checked — then only the contract wording and
+    the parent's reading stand between a spelled login and the artifacts;
+    hostnames are the contract's alone."""
     login = operator_login() if login is None else login
-    login_re = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(login)}(?![A-Za-z0-9_])") if len(login) >= 3 else None
+    # Case-insensitive: macOS logins are, and a capitalised spelling leaks
+    # the same name.
+    login_re = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(login)}(?![A-Za-z0-9_])", re.IGNORECASE) if len(login) >= 3 else None
     errors: list[str] = []
     if isinstance(value, str):
         hit = LOCAL_PATH_RE.search(value)

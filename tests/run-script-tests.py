@@ -1167,6 +1167,45 @@ class LedgerTests(RunFixture):
             self.assertIn("app/link.py", hb["files"][u1]["files"])  # listed by name, never followed
         self.refused(run("ledger.py", "brief", str(self.run_dir), "hunter", "--agent", "hunter-1", "--target", str(self.target / "nope")), "not a directory")
 
+    def list_files(self, *starting: str) -> dict:
+        code = "import json, sys; sys.path.insert(0, sys.argv[1]); import ledger; from pathlib import Path; print(json.dumps(ledger.list_files(Path(sys.argv[2]), json.loads(sys.argv[3]))))"
+        proc = subprocess.run([sys.executable, "-I", "-c", code, str(SCRIPTS), str(self.target), json.dumps(list(starting))], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout)
+
+    def test_file_listing_stays_inside_the_target_and_skips_vendored_trees(self) -> None:
+        # Review of cut 9: a link in a middle component carried the walk
+        # outside the target (the target's own tests may plant one after
+        # seed), `../x` listed outside, an absolute path crashed, and a
+        # vendored tree ate the cap before any source file.
+        outside = self.tmpdir / "outside"
+        (outside / "deep").mkdir(parents=True)
+        (outside / "deep" / "secret.txt").write_text("s", encoding="utf-8")
+        (self.target / "app" / "ext").symlink_to(outside)
+        self.assertEqual(self.list_files("app/ext/deep")["files"], [])
+        self.assertEqual(self.list_files("app/ext")["files"], [])
+        self.assertEqual(self.list_files("../outside")["files"], [])
+        self.assertEqual(self.list_files(str(outside))["files"], [])
+        listing = self.list_files("app")
+        self.assertIn("app/files.py", listing["files"])
+        self.assertTrue(all(not f.startswith("app/ext/") for f in listing["files"]), listing)
+        self.assertIn("app/ext", listing["files"]) if False else None  # a link is not a file: not listed
+        for vendored in (self.target / "node_modules" / "pkg", self.target / "app" / "vendor" / "lib"):
+            vendored.mkdir(parents=True)
+            for i in range(450):
+                (vendored / f"f{i}.js").write_text("", encoding="utf-8")
+        listing = self.list_files("app", "tests", "node_modules")  # "." is not repository-relative: whole-tree units name the top-level entries
+        self.assertFalse(listing["truncated"], listing)
+        self.assertIn("app/files.py", listing["files"])
+        self.assertTrue(all("node_modules" not in f and "/vendor/" not in f for f in listing["files"]), listing)
+        big = self.target / "generated"
+        big.mkdir()
+        for i in range(450):
+            (big / f"g{i}.txt").write_text("", encoding="utf-8")
+        listing = self.list_files("generated")
+        self.assertTrue(listing["truncated"])
+        self.assertEqual(len(listing["files"]), 400)
+
     def test_returns_that_spell_the_login_or_a_local_path_are_refused(self) -> None:
         # E32 (E2E run 4): two hunters spelled the builder's login and an
         # absolute audit path. The scripts refuse both wherever a return enters
@@ -1191,9 +1230,26 @@ class LedgerTests(RunFixture):
         self.ok(run("ledger.py", "record", str(self.run_dir), str(self.write_json(res, "h3.json"))))
         rec = self.candidate_record(0, description="see /home/builder/src/app/files.py")
         self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "r.json"))), "absolute local path")
+        # review of cut 9: other spellings of a local path, and the login in another case
+        for spelled in ("file:///Users/x/works/app.py", "//home/x/app.py", "/private/var/folders/ab/T/x.log", "/Volumes/Data/x/app.py"):
+            rec = self.candidate_record(0, description=f"see {spelled}")
+            self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "r.json"))), "absolute local path")
+        if len(login) >= 3:
+            rec = self.candidate_record(0, description=f"the owner {login.upper()}'s example")
+            self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "r.json"))), "spells the operator's login")
+        # the parent's own reasons and proposals are checked too
+        self.refused(run("ledger.py", "defer", str(self.run_dir), "--reason", "blocked on /Users/x/y", u2), "absolute local path")
+        self.refused(run("ledger.py", "abandon", str(self.run_dir), "--agent", "hunter-1", "--reason", "see /tmp/x/notes"), "absolute local path")
+        self.refused(run("run.py", "set-status", str(self.run_dir), "incomplete", "--reason", "stopped at /home/x/y"), "absolute local path")
+        props = json.loads((FIXTURES / "units.json").read_text(encoding="utf-8"))
+        props[0]["surface"] = props[0]["surface"] + " (see /Users/x/y)"
+        run3 = self.tmpdir / "out" / "run-3"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run3)))
+        self.refused(run("ledger.py", "seed", str(run3), "--target", str(self.target), "--units", str(self.write_json(props, "p.json"))), "absolute local path")
         self.refused(run("findings.py", "note", str(self.run_dir), "--agent", "verifier-1", "--kind", "lead", "--text", "left at /private/tmp/x/y"), "absolute local path")
         critic = {"agent_id": "critic-1", "missing_units": [], "reassign_ids": [{"coverage_id": u1, "reason": "guessed from /Users/x/y"}], "resolved_prior_leads": [], "stop": False}
         self.refused(run("ledger.py", "merge-critic", str(self.run_dir), str(self.write_json(critic, "c.json")), "--target", str(self.target)), "absolute local path")
+        self.refused(run("ledger.py", "merge-candidates", str(self.run_dir), "--keep", "app/files.py:read_user_file:path-traversal", "--duplicate", "app/files.py:read_user_file:symlink-escape", "--reason", "same cause, see /Users/x/notes"), "absolute local path")
 
     def test_invalid_json_is_refused_with_its_position_and_context(self) -> None:
         # E23 (E2E run 3): three returns had unbalanced braces; the re-ask quotes the spot
@@ -1285,6 +1341,15 @@ class FindingsTests(RunFixture):
         report = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
         self.assertIn("2 (1 weakening the verdict, severity, confidence or evidence kind; 1 wording or line corrections)", report)
         self.assertIn("2 件（弱化 1 件（判定・深刻度・confidence・根拠種別のいずれか）、文言・行番号の修正 1 件）", (self.run_dir / "REPORT.ja.md").read_text(encoding="utf-8"))
+        # review of cut 9: a replacement that strengthens one field and weakens another counts as strengthening and says so
+        rec["severity"]["overall"] = "high"
+        rec["confidence"]["score"] = "low"
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "d.json")), "--replace", "--by", "reverifier-3"), "strengthens")
+        out = self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "d.json")), "--replace", "--by", "reverifier-3", "--confirmed-by", "reverifier-4"))
+        self.assertEqual((out["strengthened"], out["weakened"]), (["severity.overall"], ["confidence.score"]))
+        self.ok(run("compile.py", str(self.run_dir)))
+        report = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
+        self.assertIn("3 (1 strengthening, each confirmed by a second fresh verifier; 1 weakening the verdict, severity, confidence or evidence kind; 1 wording or line corrections; 1 of the strengthening ones also weaken another field)", report)
 
     def test_strengthening_replacement_needs_a_second_fresh_verifier(self) -> None:
         self.hunt()

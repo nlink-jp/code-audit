@@ -25,6 +25,7 @@ import argparse
 import math
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -89,7 +90,7 @@ def by_id(units: list) -> dict:
 
 
 def build_unit(proposal: dict, profile: str, target: Path, where: str) -> tuple[dict | None, list[str]]:
-    errors = c.validate_part(proposal, "unit_proposal", where) + c.forbidden_char_errors(proposal, where)
+    errors = c.validate_part(proposal, "unit_proposal", where) + c.forbidden_char_errors(proposal, where) + c.personal_identifier_errors(proposal, where)
     if errors:
         return None, errors
     refs = dict(proposal["canonical_refs"])
@@ -935,6 +936,7 @@ def cmd_merge_candidates(args: argparse.Namespace) -> None:
     candidates = c.load_candidates(run_dir)
     ids = by_id(units)
     keep, dups, reason = args.keep, list(args.duplicate), args.reason
+    c.fail_if(c.personal_identifier_errors(reason, "reason"))
     errors: list[str] = []
     if not reason.strip():
         errors.append("--reason needs text: why the claims share one root cause")
@@ -1013,6 +1015,7 @@ def unit_brief(u: dict) -> dict:
 
 
 FILE_LIST_CAP = 400
+LISTING_SKIP_DIRS = c.DIGEST_SKIP_DIRS | {"vendor", "dist", "build", "target", ".tox", ".mypy_cache", ".pytest_cache"}
 
 
 def list_files(target: Path, starting_paths: list[str]) -> dict:
@@ -1022,14 +1025,23 @@ def list_files(target: Path, starting_paths: list[str]) -> dict:
     found: list[str] = []
     truncated = False
     for sp in starting_paths:
-        root = target / sp
-        if root.is_symlink() or not root.exists():
+        # The tree may have changed since seed (the target's own tests ran):
+        # a link in any component, or a path that leaves the target, is
+        # skipped rather than followed — the listing names what is inside.
+        st = c.lstat_no_links(target, sp) if c.is_repo_relative(sp) else None
+        if st is None or stat.S_ISLNK(st.st_mode) or sp.rsplit("/", 1)[-1] in LISTING_SKIP_DIRS:
             continue
-        if root.is_file():
+        root = target / sp
+        if stat.S_ISREG(st.st_mode):
             found.append(sp)
             continue
+        if not stat.S_ISDIR(st.st_mode):
+            continue
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = sorted(d for d in dirnames if d != ".git" and not (Path(dirpath) / d).is_symlink())
+            # Vendored and cache trees would fill the cap before any source
+            # file (the review of this cut showed it); links are listed by
+            # name below, never descended.
+            dirnames[:] = sorted(d for d in dirnames if d not in LISTING_SKIP_DIRS and not (Path(dirpath) / d).is_symlink())
             for fn in sorted(filenames):
                 rel = (Path(dirpath) / fn).relative_to(target).as_posix()
                 if len(found) >= FILE_LIST_CAP:
@@ -1345,6 +1357,7 @@ def cmd_decide(args: argparse.Namespace) -> None:
 
 def cmd_defer(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
+    c.fail_if(c.personal_identifier_errors(args.reason, "reason"))
     units = load_ledger(run_dir)
     candidates = c.load_candidates(run_dir)
     ids = by_id(units)
@@ -1370,6 +1383,7 @@ def cmd_abandon(args: argparse.Namespace) -> None:
     Used when a hunter's result was discarded twice: the units need a fresh
     owner (assign refuses the same agent) or a deferral with a reason."""
     run_dir = Path(args.run_dir)
+    c.fail_if(c.personal_identifier_errors(args.reason, "reason"))
     units = load_ledger(run_dir)
     candidates = c.load_candidates(run_dir)
     owned = [u for u in units if u["status"] == "in_progress" and u["agent_id"] == args.agent]

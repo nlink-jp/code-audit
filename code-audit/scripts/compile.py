@@ -29,7 +29,7 @@ L = {
         "title": "code-audit 報告書",
         "run": "実行の事実",
         "run_id": "run_id", "repo": "リポジトリ", "source_ref": "source ref", "dirty": "作業ツリーに未コミットの変更", "profile": "プロファイル",
-        "budget": "予算（呼び出し回数）", "invocations": "実績の呼び出し回数", "status": "run_status", "prior": "持ち越した過去の実行", "policy": "実行方針", "created": "開始", "replacements": "再検証で置換したレコード", "replacements_value": "{n} 件（{parts}）", "repl_strong": "強化 {s} 件・いずれも別の新しい検証者が確認", "repl_weak": "弱化 {w} 件（判定・深刻度・confidence・根拠種別のいずれか）", "repl_wording": "文言・行番号の修正 {o} 件", "repl_join": "、",
+        "budget": "予算（呼び出し回数）", "invocations": "実績の呼び出し回数", "status": "run_status", "prior": "持ち越した過去の実行", "policy": "実行方針", "created": "開始", "replacements": "再検証で置換したレコード", "replacements_value": "{n} 件（{parts}）", "repl_strong": "強化 {s} 件・いずれも別の新しい検証者が確認", "repl_weak": "弱化 {w} 件（判定・深刻度・confidence・根拠種別のいずれか）", "repl_wording": "文言・行番号の修正 {o} 件", "repl_both": "うち {b} 件は別の欄を弱めてもいる", "repl_join": "、",
         "yes": "あり", "no": "なし", "none": "なし", "unset": "未設定", "th_item": "項目", "th_value": "値",
         "partial": "この実行は部分的な網羅です。",
         "partial_quick": "quick プロファイルはハンター 1 波と批評 1 回の事前宣言された早期終了であり、網羅の完了を意味しません。",
@@ -59,7 +59,7 @@ L = {
         "title": "code-audit report",
         "run": "Run facts",
         "run_id": "run_id", "repo": "repository", "source_ref": "source ref", "dirty": "uncommitted changes in the worktree", "profile": "profile",
-        "budget": "budget (invocations)", "invocations": "actual invocations", "status": "run_status", "prior": "prior runs carried", "policy": "execution policy", "created": "started", "replacements": "records replaced after re-verification", "replacements_value": "{n} ({parts})", "repl_strong": "{s} strengthening, each confirmed by a second fresh verifier", "repl_weak": "{w} weakening the verdict, severity, confidence or evidence kind", "repl_wording": "{o} wording or line corrections", "repl_join": "; ",
+        "budget": "budget (invocations)", "invocations": "actual invocations", "status": "run_status", "prior": "prior runs carried", "policy": "execution policy", "created": "started", "replacements": "records replaced after re-verification", "replacements_value": "{n} ({parts})", "repl_strong": "{s} strengthening, each confirmed by a second fresh verifier", "repl_weak": "{w} weakening the verdict, severity, confidence or evidence kind", "repl_wording": "{o} wording or line corrections", "repl_both": "{b} of the strengthening ones also weaken another field", "repl_join": "; ",
         "yes": "yes", "no": "no", "none": "none", "unset": "unset", "th_item": "Item", "th_value": "Value",
         "partial": "This run is a partial pass.",
         "partial_quick": "The quick profile is a pre-declared early stop (one hunter wave, one critic) and is not evidence of complete coverage.",
@@ -175,6 +175,9 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
             parts.append(t["repl_weak"].format(w=weak))
         if wording:
             parts.append(t["repl_wording"].format(o=wording))
+        both = sum(1 for r in replacements if r.get("strengthened") and r.get("weakened"))
+        if both:
+            parts.append(t["repl_both"].format(b=both))
         rows.append([t["replacements"], t["replacements_value"].format(n=len(replacements), parts=t["repl_join"].join(parts))])
     out += table([t["th_item"], t["th_value"]], rows)
     partial = []

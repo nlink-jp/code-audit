@@ -444,6 +444,8 @@ def cmd_set_status(args: argparse.Namespace) -> None:
     meta = c.load_metadata(run_dir)
     if args.status == "incomplete" and not args.reason:
         c.die("incomplete needs --reason")
+    if args.reason:
+        c.fail_if(c.personal_identifier_errors(args.reason, "reason"))
     if args.status == "complete" and (run_dir / c.LEDGER_FILE).exists():
         # A complete run has nothing left open and its books agree; otherwise
         # it is incomplete with a reason, and the report says so.
