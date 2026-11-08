@@ -576,6 +576,9 @@ class LedgerTests(RunFixture):
         ret = self.write_json({"agent_id": "verifier-1", "verdict": "confirmed", "record": dict(self.candidate_record(0), source_digests={}), "layers_examined": [], "notes": []}, "verifier.json")
         out = self.ok(run("findings.py", "digest", str(ret), "--target", str(self.target)))
         self.assertEqual(json.loads(ret.read_text(encoding="utf-8"))["record"]["source_digests"], {"app/files.py": self.d1})
+        # the whole verifier return is accepted by add: the script takes the record out
+        out = self.ok(run("findings.py", "add", str(self.run_dir), str(ret), "--target", str(self.target)))
+        self.assertEqual(out["fingerprint"], "app/files.py:read_user_file:path-traversal")
 
     def test_record_holds_candidates_to_the_findings_bar(self) -> None:
         self.seed()

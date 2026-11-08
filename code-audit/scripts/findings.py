@@ -7,7 +7,8 @@ Usage:
     findings.py digest <record.json | hunter-result.json | verifier-return.json> --target <dir>
     findings.py note <run-dir> --agent <id> --kind out_of_scope|hardening --text TEXT [--coverage-id ID]
 
-`add` inserts one validated record, sorted by fingerprint, for a claim the
+`add` takes a record, or a verifier's whole return (its `record` is used),
+and inserts one validated record, sorted by fingerprint, for a claim the
 ledger holds (a pending candidate; with --replace, a decided one), and
 refuses a duplicate fingerprint unless --replace. A replacement needs --by;
 one that strengthens the verdict, severity, confidence or evidence kind also
@@ -107,6 +108,8 @@ def cmd_add(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     c.load_metadata(run_dir)
     rec = c.read_json(Path(args.record))
+    if isinstance(rec, dict) and isinstance(rec.get("record"), dict):
+        rec = rec["record"]  # a verifier's or re-verifier's whole return
     if not isinstance(rec, dict):
         c.die("record must be an object")
     target = Path(args.target) if args.target else None

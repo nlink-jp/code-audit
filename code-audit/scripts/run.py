@@ -4,6 +4,7 @@
 Usage:
     run.py init --target <dir> [--output <dir>] [--profile quick|standard]
     run.py approve <run-dir> [--budget N]
+    run.py nonce
                 [--budget N] [--prior <run-dir>]...
     run.py set-budget <run-dir> N
     run.py count <run-dir> reconnaissance|hunter|critic|verifier|reverifier [--n N]
@@ -357,6 +358,13 @@ def cmd_set_budget(args: argparse.Namespace) -> None:
     c.emit({"budget": meta["budget"]})
 
 
+def cmd_nonce(args: argparse.Namespace) -> None:
+    """A fresh token for the <target-data nonce="..."> tags the parent wraps
+    target-derived text in before a model reads it."""
+    import secrets
+    c.emit({"nonce": secrets.token_hex(8)})
+
+
 def cmd_approve(args: argparse.Namespace) -> None:
     """Record the human's approval of the cost estimate. Until it is recorded
     no hunter can be assigned (`ledger.py assign` checks it); the budget is
@@ -541,6 +549,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("run_dir")
     p.add_argument("n", type=int)
     p.set_defaults(func=cmd_set_budget)
+
+    p = sub.add_parser("nonce")
+    p.set_defaults(func=cmd_nonce)
 
     p = sub.add_parser("approve")
     p.add_argument("run_dir")
