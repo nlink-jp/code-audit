@@ -84,3 +84,17 @@ to hardening notes.
 | Carry-over | run-1's 6 confirmed and 1 needs_validation re-verified first; the 9 rejected suppress the same claims |
 | Launches | 4 + hunter 13–14 + critic 3 + verifier 12–14 + reverifier 13–15 + 15% re-asks ≈ 55–60 |
 | Tokens | about 5.5–6M |
+
+## Adopted in cut (8) (2026-11-08)
+
+E21–E28 all adopted (97 tests). E21–E26 in the scripts: `ledger.py architecture RUN`
+composes `architecture.md` from `agents/recon-*.json` (refusing a return with an
+absolute local path) and every `brief` refuses until it exists; the queue had kept the
+hunter's proposal under `verdict`, so the briefs now present it as `proposed_verdict`
+with the root cause; `brief verifier` prints `required_fields` per verdict and the
+`file_rule` from the schema; `read_json` prints 60 characters around a failure; the
+estimate subtracts launched critics, uses the real queue once hunting is over, and its
+constants are quick 0.45 / standard 0.30 candidates per unit and 15% re-asks. E27
+(whole-tree units alone with their hunter), E28 (reading pinned dependencies and GOROOT,
+cited in prose) and the rule for passing the cost gate again (once, on a shortfall the
+books show) are SKILL.md wording.

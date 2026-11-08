@@ -131,19 +131,21 @@
   waves. Deferred: E20 (a `brief critic --since-wave` delta). 94 tests.
 - Third end-to-end run (2026-11-08, `web-fetch`, quick: 43 launches, about
   4.6M tokens, 6 confirmed / 1 needs_validation / 9 rejected; record in
-  `docs/{ja,en}/reviews/2026-11-08-e2e-quick-web-fetch*.md`). Lessons
-  E21–E28 recorded for cut 8: `architecture.md` composed by a script and
-  required by `brief`; the briefs carry the candidate's proposed verdict and
-  root cause; the save step prints the context of a JSON failure; the
-  verifier contract lists the required fields per verdict and confines
-  `trace` / `evidence` files to the target; the estimate subtracts launched
-  critics and uses per-profile candidate rates; whole-tree units get their
-  own hunter; verifiers may read pinned dependencies and GOROOT.
+  `docs/{ja,en}/reviews/2026-11-08-e2e-quick-web-fetch*.md`) and cut (8),
+  its lessons: `ledger.py architecture` composes `architecture.md` from the
+  saved reconnaissance returns and every `brief` requires it; the critic's
+  and verifier's briefs carry the candidate's proposed verdict and root
+  cause, and the verifier's the required fields per verdict and the file
+  rule; invalid JSON is refused with its position and context; the estimate
+  subtracts launched critics, uses the real queue once hunting is over and
+  takes per-profile candidate rates (quick 0.45 / standard 0.30) with 15%
+  re-asks; SKILL.md keeps whole-tree units alone with their hunter, passes
+  the cost gate again only on a shortfall the books show, and lets verifiers
+  read pinned dependencies and GOROOT, cited in prose. 97 tests.
 
 ### Planned for 0.1.0
 
 Phase 3: three of the four end-to-end runs are done (`webhook-relay` quick
-and standard, `web-fetch` quick; records in `docs/{ja,en}/reviews/`). Left:
-cut 8 (lessons E21–E28), the `web-fetch` standard run with `--prior`
-(estimated 55–60 launches, about 5.5–6M tokens), release per the
-organization checklist.
+and standard, `web-fetch` quick; records in `docs/{ja,en}/reviews/`) and cut 8
+is applied. Left: the `web-fetch` standard run with `--prior` (estimated 55–60
+launches, about 5.5–6M tokens), release per the organization checklist.

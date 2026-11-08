@@ -109,9 +109,14 @@ reach the next run's critic through `seed --prior`. From the second run
 (`docs/en/reviews/2026-11-08-e2e-standard-webhook-relay.md`): every role's
 input is printed from the books (`ledger.py brief hunter|critic|verifier|reverifier`),
 and a prior run of the other profile still carries over, matched by
-surface × boundary × class. The third run
-(`docs/en/reviews/2026-11-08-e2e-quick-web-fetch.md`) recorded lessons
-E21–E28 for cut 8, not yet applied.
+surface × boundary × class. From the third run
+(`docs/en/reviews/2026-11-08-e2e-quick-web-fetch.md`): the reconnaissance
+synthesis `architecture.md` is composed by a script from the saved returns
+(`ledger.py architecture`) and no role's brief prints without it; the briefs
+carry the candidate's proposed verdict and root cause and the required fields
+of each verdict; invalid JSON is refused with its position and context; the
+estimate subtracts launched critics, uses the real queue once hunting is
+over, and takes a per-profile candidate rate.
 Residual risks are in the RFP: the target's own tests run unsandboxed as
 your user, and whether a sub-agent really has no shell depends on the agent
 type the runtime offers.

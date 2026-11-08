@@ -525,3 +525,8 @@ independent pass), it sits beside compliance-review and incident-review.
   files to the target; the estimate subtracts launched critics and uses
   per-profile candidate rates; whole-tree units get their own hunter;
   verifiers may read pinned dependencies and GOROOT.
+- **2026-11-08 cut (8) (the third run's adopted lessons)**: E21–E28 all
+  adopted (97 tests). E21–E26 in the scripts (`ledger.py architecture`, the
+  briefs' proposed verdict, root cause and required fields, the JSON failure
+  context, the estimate's critic subtraction and per-profile constants);
+  E27, E28 and the rule for passing the cost gate again as SKILL.md wording.

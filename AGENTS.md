@@ -20,8 +20,9 @@ tested over the fixture repository. Two pre-release independent
 verification rounds ran on 2026-11-08 and their adopted findings are applied
 (cuts 4 and 5; triage in `docs/{ja,en}/reviews/`); the rounds stop here, the
 second having found no high defect in the scripts. Phase 3: three of the
-four E2E runs are done with cost recorded (`docs/{ja,en}/reviews/`); left are
-cut 8 (lessons E21–E28), the `web-fetch` standard run and the v0.1.0 release.
+four E2E runs are done with cost recorded (`docs/{ja,en}/reviews/`) and cut 8
+applied their lessons; left are the `web-fetch` standard run and the v0.1.0
+release.
 
 ## Key commands
 
@@ -39,7 +40,7 @@ Bundled scripts (stdlib-only Python 3.9+; `--help` on each):
 | Script | Subcommands | Owns |
 |--------|-------------|------|
 | `run.py` | `init`, `approve [--budget N]`, `nonce`, `set-budget`, `count [--agent [--rerun]]`, `set-status`, `validate`, `exec` | `run-metadata.json`, `checks/<id>.log`, `cache/` (toolchain caches `exec` redirects) |
-| `ledger.py` | `seed [--prior]`, `assign`, `record`, `merge-critic`, `merge-candidates`, `brief hunter|critic|verifier|reverifier`, `decide`, `defer`, `abandon`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json` (and appends hunter notes to `notes.json`) |
+| `ledger.py` | `seed [--prior]`, `architecture`, `assign`, `record`, `merge-critic`, `merge-candidates`, `brief hunter|critic|verifier|reverifier`, `decide`, `defer`, `abandon`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json`, `architecture.md` (and appends hunter notes to `notes.json`) |
 | `findings.py` | `validate`, `add [--replace --by <agent> [--confirmed-by <agent>]]`, `digest`, `note` | `findings.json`, `replacements.json`, `notes.json` (`digest` writes back the record file it is given) |
 | `compile.py` | (run dir) | `REPORT.ja.md`, `REPORT.md`, `NEEDS-VALIDATION.ja.md`, `NEEDS-VALIDATION.md` |
 | `classes.py` | `list`, `size`, `check-knowledge [--adr] [--origin]` | nothing; checks `classes/*.md` |
@@ -143,6 +144,16 @@ code-audit/
   `brief reverifier --fingerprint` complete the roles; the estimate's
   constants are 0.35 candidates per unit and 10% re-asks; the report's
   replacement line varies with the strengthened count.
+- **Cut 8 (third E2E)**: `ledger.py architecture RUN` composes
+  `architecture.md` from `agents/recon-*.json` (refusing an absolute local
+  path) and every `brief` refuses until it exists; the candidate queue keeps
+  the hunter's proposal under `verdict`, which the briefs present as
+  `proposed_verdict` with the root cause; `brief verifier` prints
+  `required_fields` per verdict from the schema and the `file_rule`;
+  `_contract.read_json` quotes the position and context of invalid JSON;
+  the estimate subtracts launched critics, uses the pending count once
+  hunting is over, and its constants are per profile (quick 0.45 /
+  standard 0.30 candidates per unit, 15% re-asks).
 - **`decide` requires the record first** (`findings.py add`), then links the
   fingerprint to units; a carried record on a still-planned unit needs
   `--agent` (the verifier becomes the owner).

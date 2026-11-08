@@ -77,3 +77,14 @@ hardening に格下げ。
 | 持ち越し | run-1 の confirmed 6・needs_validation 1 を先に再検証、rejected 9 は同じ主張を抑止 |
 | 呼び出し | 4＋hunter 13〜14＋critic 3＋verifier 12〜14＋reverifier 13〜15＋再依頼 15% ≈ 55〜60 |
 | トークン | 約 5.5〜6M |
+
+## 区切り (8) での採用（2026-11-08）
+
+E21〜E28 をすべて採用した（97 テスト緑）。E21〜E26 はスクリプト: `ledger.py architecture RUN` が
+`agents/recon-*.json` から `architecture.md` を組み（絶対ローカルパスを含む返答は拒む）、
+無ければどの役の `brief` も印字しない。待ち行列は hunter の判定案を `verdict` に持っていたので、
+brief が `proposed_verdict` と根本原因として印字する。`brief verifier` は schema から判定ごとの
+`required_fields` と `file_rule` を印字する。`read_json` は失敗位置の前後 60 字を印字する。
+見積もりは起動済みの批評者を引き、狩りが終われば待ち行列の実数を使い、定数は quick 0.45 /
+standard 0.30・再依頼 15%。E27（リポ全体の単位は単独割り当て）、E28（固定版の依存先と GOROOT の
+読解を許し、引用は散文で）、費用ゲートの再通過（帳簿が不足を示したときだけ 1 回）は SKILL.md の文言。

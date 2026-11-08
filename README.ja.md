@@ -96,8 +96,11 @@ coverage_id を打ち直さない。ツールチェーンのキャッシュは r
 （`docs/ja/reviews/2026-11-08-e2e-standard-webhook-relay.ja.md`）から:
 全役の入力を台帳から印字する（`ledger.py brief hunter|critic|verifier|reverifier`）。
 別プロファイルの前回実行も surface×boundary×class で突き合わせて持ち越す。第 3 走
-（`docs/ja/reviews/2026-11-08-e2e-quick-web-fetch.ja.md`）の学び E21〜E28 は区切り (8)
-の候補として記録済み、未適用。
+（`docs/ja/reviews/2026-11-08-e2e-quick-web-fetch.ja.md`）から: 偵察の総合
+`architecture.md` は保存した偵察返答からスクリプトが組み（`ledger.py architecture`）、
+無ければどの役の brief も印字しない。brief は候補の判定案と根本原因、判定ごとの必須欄を
+運ぶ。壊れた JSON は失敗位置と前後を添えて拒む。見積もりは起動済みの批評者を引き、
+狩りが終われば待ち行列の実数を使い、候補率はプロファイル別。
 残余リスクは RFP に記載: 対象自身のテストはサンドボックスなしに利用者の権限で
 走る。サブエージェントに本当にシェルが無いかは、ランタイムが提供する
 エージェント種別に依る。
