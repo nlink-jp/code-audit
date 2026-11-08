@@ -8,7 +8,11 @@ Usage:
 
 A class file is Markdown. Each class is a level-2 heading followed, before
 any other content, by one `Source:` line naming where the lesson is
-recorded: `security.md#Heading text` (a document under the knowledge
+recorded and, for a product-type class that sharpens a generic one, an
+optional `Refines:` line naming the generic class(es) as
+`classes/generic.md#<Heading>` (the parent uses it to exclude the generic
+class on a surface the product-type class covers; every target must exist).
+Sources are `security.md#Heading text` (a document under the knowledge
 repository's docs/en/), `ADR-021` (an organization ADR), or
 `origin:ATTACK-CLASSES.md#Injection` (a block of the skill this design
 derives from, cloudflare/security-audit-skill at commit c1c8a8c, under
@@ -33,6 +37,8 @@ import _contract as c  # noqa: E402
 DEFAULT_CLASSES = Path(__file__).resolve().parent.parent / "classes"
 HEADING_RE = re.compile(r"^## +(.+?)\s*$")
 SOURCE_RE = re.compile(r"^Source:\s*(.+?)\s*$")
+REFINES_RE = re.compile(r"^Refines:\s*(.+?)\s*$")
+CLASS_REF_RE = re.compile(r"^classes/([A-Za-z0-9_.-]+\.md)#(.+)$")
 ADR_RE = re.compile(r"^ADR-(\d{3})$")
 KNOWLEDGE_RE = re.compile(r"^([A-Za-z0-9_.-]+\.md)#(.+)$")
 ORIGIN_RE = re.compile(r"^origin:([A-Za-z0-9_.-]+\.md)#(.+)$")
@@ -58,11 +64,21 @@ def parse_class_file(path: Path) -> tuple[list[dict], list[str]]:
         if m:
             if current and awaiting_source:
                 errors.append(f"{path.name}:{current['line']}: class '{current['name']}' has no Source: line")
-            current = {"file": path.name, "name": m.group(1), "line": lineno, "sources": []}
+            current = {"file": path.name, "name": m.group(1), "line": lineno, "sources": [], "refines": []}
             classes.append(current)
             awaiting_source = True
             continue
         if current is None:
+            continue
+        r = REFINES_RE.match(line)
+        if r:
+            if awaiting_source:
+                errors.append(f"{path.name}:{lineno}: Refines: comes after the Source: line")
+            for ref in (x.strip() for x in r.group(1).split(",")):
+                if CLASS_REF_RE.match(ref):
+                    current["refines"].append(ref)
+                else:
+                    errors.append(f"{path.name}:{lineno}: Refines: wants classes/<file>.md#<Heading>, got '{ref}'")
             continue
         s = SOURCE_RE.match(line)
         if s:
@@ -104,6 +120,11 @@ def load_classes(classes_dir: Path) -> tuple[list[dict], list[str]]:
         if key in seen:
             errors.append(f"{cl['file']}:{cl['line']}: duplicate class name '{cl['name']}'")
         seen[key] = cl["file"]
+    known = {f"classes/{cl['file']}#{cl['name']}" for cl in all_classes}
+    for cl in all_classes:
+        for ref in cl["refines"]:
+            if ref not in known:
+                errors.append(f"{cl['file']}:{cl['line']}: Refines: '{ref}' names no class in this directory")
     return all_classes, errors
 
 
@@ -132,7 +153,7 @@ def headings_in(path: Path, bold_blocks: bool = False) -> set[str]:
 def cmd_list(args: argparse.Namespace) -> None:
     classes, errors = load_classes(Path(args.classes))
     c.fail_if(errors)
-    c.emit([{"file": cl["file"], "name": cl["name"], "sources": [s["ref"] for s in cl["sources"]]} for cl in classes])
+    c.emit([{"file": cl["file"], "name": cl["name"], "sources": [s["ref"] for s in cl["sources"]], "refines": list(cl["refines"])} for cl in classes])
 
 
 def cmd_size(args: argparse.Namespace) -> None:

@@ -13,6 +13,7 @@ Find every write and compare its destination with the work_dir contract.
 
 ## Borrowed injection lens
 Source: origin:ATTACK-CLASSES.md#Injection, security.md#A check that refuses places must not write to test them
+Refines: classes/sample.md#Path confinement after resolution
 
 Trace the caller's value to the sink; written in our words from the origin's lens.
 

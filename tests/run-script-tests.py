@@ -1402,6 +1402,15 @@ class ClassesTests(unittest.TestCase):
         self.assertEqual([c["name"] for c in classes], ["Path confinement after resolution", "Writes outside the declared work directory", "Borrowed injection lens"])
         self.assertEqual(classes[1]["sources"], ["ADR-021", "security.md#A check that refuses places must not write to test them"])
         self.assertEqual(classes[2]["sources"], ["origin:ATTACK-CLASSES.md#Injection", "security.md#A check that refuses places must not write to test them"])
+        self.assertEqual((classes[0]["refines"], classes[2]["refines"]), ([], ["classes/sample.md#Path confinement after resolution"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "classes"
+            d.mkdir()
+            (d / "x.md").write_text("## A\nSource: ADR-021\nRefines: classes/generic.md#No Such Class\n\nbody\n\n## B\nRefines: classes/x.md#A\nSource: ADR-021\n\nbody\n", encoding="utf-8")
+            proc = run("classes.py", "list", "--classes", str(d))
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("names no class in this directory", proc.stderr)
+            self.assertIn("comes after the Source: line", proc.stderr)
 
     def test_check_knowledge_verifies_headings(self) -> None:
         proc = run("classes.py", "check-knowledge", "--classes", str(FIXTURES / "classes"), "--knowledge", str(FIXTURES / "knowledge"))
@@ -1454,6 +1463,15 @@ class ClassesTests(unittest.TestCase):
         names = [c["name"] for c in classes]
         self.assertEqual(len(names), len(set(names)), "class names collide across files")
         self.assertNotIn("Third-party text reaches a terminal or log raw", names)
+        # product-type classes say which generic class they sharpen, as a line the scripts read
+        product = [c for c in classes if c["file"] != "generic.md"]
+        with_refines = [c for c in product if c["refines"]]
+        self.assertGreaterEqual(len(with_refines), 35, [c["name"] for c in product if not c["refines"]])
+        self.assertTrue(all(r.startswith("classes/generic.md#") and r.split("#", 1)[1] in generic for c in with_refines for r in c["refines"]))
+        # no sentence of the origin's class document appears verbatim in generic.md
+        text = (SKILL / "classes" / "generic.md").read_text(encoding="utf-8")
+        self.assertNotIn("A flag is not a finding", text)
+        self.assertNotIn("Thorough and literal", text)
     def test_source_split_keeps_commas_inside_headings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             classes = Path(tmp) / "classes"

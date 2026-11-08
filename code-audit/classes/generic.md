@@ -18,9 +18,10 @@ path grammar, format parser, log line, cache key, an external tool's
 argument list. What counts as a sink depends on the product: a CLI builds
 commands and paths; a service builds queries, messages and log lines; a
 library processes caller data in parsers and buffers. Follow each value from
-the surface to the sink, including the indirect path (stored safely, read
-back later into a different context) and injection through keys, field
-names, headers and metadata, not only values. Covered when the sink is
+the surface to the sink, including the indirect path (a value stored
+harmlessly, read back later into a context that interprets it) and the
+carriers nobody escapes: a key, a field name, a header, a piece of metadata.
+Covered when the sink is
 reached only through an escaping or a closed vocabulary you can point at,
 or when the sink itself cannot act (a read-only database, not a keyword
 check or a "readonly" flag). A parser written by searching and slicing
@@ -29,9 +30,9 @@ strings is a candidate until a test pins its grammar.
 ## Access control
 Source: origin:ATTACK-CLASSES.md#Access control, security.md#A gate asks whether the operation is allowed — "the right operation with the wrong value" passes every layer, security.md#A protected-path list is enforced per operation, not per tool family — the write tools' Block is not the read tools' protection, mcp-server-design.md#Put each control in the layer that owns it — the credential decides what can be done, the runtime what may be called, the tool only does it right
 
-Who may do what, enforced where. Do not stop at "a check exists": is it the
-right permission, for the right resource, through the right mechanism? Is
-there a second path to the same state change that checks a weaker
+Who may do what, enforced where. A check that exists is not yet a check
+that applies: which permission does it test, on which resource, and by which
+mechanism? Is there a second path to the same state change that checks a weaker
 permission? Can a field in the request override what the check restricts?
 Does an entry authenticate but forget to authorise? Do bulk, batch, export
 and import paths enforce per-item permission? List the enforcers by
@@ -108,10 +109,11 @@ operation.
 ## Chained
 Source: origin:ATTACK-CLASSES.md#Chained vulnerabilities and trust boundaries, security.md#A guard keyed on one layer's refusal flag is a hole at every other layer — key it on "the tool ran", testing.md#When two defences cover one failure, an observation explained by either is evidence for neither
 
-Behaviour that is allowed or contained on its own and becomes a weakness
-when another component relies on a stronger guarantee. Compare exactly what
-component A guarantees with what component B assumes (truncation, coercion,
-normalisation, tenant scope); follow second-order use (a stored field name
+Two components that are each correct against their own contract, where the
+second trusts more than the first promised. Write down the promise the
+producer keeps (how long a value may be, its type, its normalisation, whose
+tenant it belongs to) next to the assumption the consumer makes, and look at
+the gap; follow second-order use (a stored field name
 becomes a JSON path, a slug a file path, escaped text raw rendering); watch
 capability growth after delegation, refresh, caching or role change; check
 setup, migration, soft-delete, revoke/expiry and check/use windows; confirm
@@ -124,8 +126,9 @@ unit's candidate depends on another unit's state, record both coverage ids.
 Source: origin:ATTACK-CLASSES.md#Wildcard, llm-integration.md#Subagent output contracts must state what NOT to output
 
 Anything the other classes do not name, so that a real weakness outside the
-vocabulary has a destination inside the ledger. Read what looks boring or
-disconnected from security: the strangest code and why it exists;
+vocabulary has a destination inside the ledger. Spend time on the code that
+seems to have nothing to do with security: the strangest code and why it
+exists;
 half-finished, experimental, compatibility and fallback features; what the
 API allows that the client never does; hidden parameters, headers and
 routes; features combined that were not designed together; reverted fixes
@@ -137,7 +140,8 @@ boundary; an observation without one is a note, not a finding.
 ## Obvious things
 Source: origin:ATTACK-CLASSES.md#Obvious things, security.md#Sample placeholders must not trip secret scanning, security.md#Never write PII — "it's discoverable anyway" is not a reason, shell-scripting.md#An operational script must not infer its root from $PWD — and a skipped check must never summarize green, testing.md#A release gate that skips is a gate that passes
 
-The basic exposures everyone assumes someone else checked. Hardcoded
+The elementary exposures that go unchecked because each reviewer assumes
+another one covered them. Hardcoded
 passwords, keys and tokens; real-looking placeholders; TODO / FIXME / HACK
 comments that name a missing check; debug and dev modes reachable from an
 environment variable, parameter or header; test or seed credentials that
@@ -148,5 +152,6 @@ child processes fed dynamic input; permissive CORS and cookie flags; open
 redirects; stack traces and internal paths in production errors; personal
 data in documents and release notes; checks that report green when they did
 not run; operational scripts that infer their root from the working
-directory. Thorough and literal: check every item. A flag is not a
-finding — trace the impact before reporting.
+directory. Work the list to its end, item by item. A hit on the list is
+not yet a finding: follow it to an affected principal and resource before it
+becomes a candidate.
