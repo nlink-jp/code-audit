@@ -19,8 +19,9 @@ citations verified against the knowledge, ADR and origin checkouts on
 tested over the fixture repository. Two pre-release independent
 verification rounds ran on 2026-11-08 and their adopted findings are applied
 (cuts 4 and 5; triage in `docs/{ja,en}/reviews/`); the rounds stop here, the
-second having found no high defect in the scripts. Left for Phase 3: E2E on
-two real repositories with cost recorded, the v0.1.0 release.
+second having found no high defect in the scripts. Phase 3: three of the
+four E2E runs are done with cost recorded (`docs/{ja,en}/reviews/`); left are
+cut 8 (lessons E21–E28), the `web-fetch` standard run and the v0.1.0 release.
 
 ## Key commands
 

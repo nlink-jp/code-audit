@@ -95,7 +95,9 @@ coverage_id を打ち直さない。ツールチェーンのキャッシュは r
 `lead` ノートは次走の `seed --prior` が批評者に渡す。第 2 走
 （`docs/ja/reviews/2026-11-08-e2e-standard-webhook-relay.ja.md`）から:
 全役の入力を台帳から印字する（`ledger.py brief hunter|critic|verifier|reverifier`）。
-別プロファイルの前回実行も surface×boundary×class で突き合わせて持ち越す。
+別プロファイルの前回実行も surface×boundary×class で突き合わせて持ち越す。第 3 走
+（`docs/ja/reviews/2026-11-08-e2e-quick-web-fetch.ja.md`）の学び E21〜E28 は区切り (8)
+の候補として記録済み、未適用。
 残余リスクは RFP に記載: 対象自身のテストはサンドボックスなしに利用者の権限で
 走る。サブエージェントに本当にシェルが無いかは、ランタイムが提供する
 エージェント種別に依る。

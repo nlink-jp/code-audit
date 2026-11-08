@@ -448,3 +448,10 @@ compliance-review / incident-review と並ぶ。
   批評者追加の単位も prior_status を持つ、`brief` に hunter と reverifier、見積もり
   定数は 2 走の実測（0.35 / 10%）、置換行の文言、批評者の契約に型を明記、波の間の検証を
   許す。E20（批評者 brief の差分化）は単位数が増えるまで保留。
+- **2026-11-08 E2E 第 3 走（web-fetch / quick）**: 43 回・約 4.6M トークンで完走
+  （confirmed 6 / needs_validation 1 / rejected 9、見積もり 34 回の 1.3 倍で費用ゲートを
+  途中 2 回通した）。記録は `docs/ja/reviews/2026-11-08-e2e-quick-web-fetch.ja.md`。
+  学び E21〜E28 を区切り (8) の候補として記録: architecture.md をスクリプトが組み brief が
+  要求する、brief に候補の判定案と根本原因、JSON 失敗位置の印字、検証者の契約に必須欄と
+  「file は対象内のみ」、見積もりは起動済み批評者を引きプロファイル別の候補率、リポ全体の
+  単位は単独割り当て、固定版の依存先と GOROOT の読解を検証者に許す。

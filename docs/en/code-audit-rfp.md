@@ -514,3 +514,14 @@ independent pass), it sits beside compliance-review and incident-review.
   10%), the replacement line's wording, the critic contract states its types,
   verification may run between waves. E20 (a delta critic brief) is deferred
   until the unit count calls for it.
+- **2026-11-08 E2E run 3 (web-fetch / quick)**: 43 launches and about 4.6M
+  tokens (confirmed 6 / needs_validation 1 / rejected 9; 1.3× the 34-launch
+  estimate, the cost gate passed twice more mid-run); record in
+  `docs/en/reviews/2026-11-08-e2e-quick-web-fetch.md`. Lessons E21–E28
+  recorded as candidates for cut (8): `architecture.md` composed by a script
+  and required by `brief`; the briefs carry the candidate's proposed verdict
+  and root cause; the save step prints the context of a JSON failure; the
+  verifier contract lists required fields and confines `trace` / `evidence`
+  files to the target; the estimate subtracts launched critics and uses
+  per-profile candidate rates; whole-tree units get their own hunter;
+  verifiers may read pinned dependencies and GOROOT.
