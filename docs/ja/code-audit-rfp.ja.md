@@ -459,3 +459,12 @@ compliance-review / incident-review と並ぶ。
   E21・E22・E23・E24・E25・E26 はスクリプト（`ledger.py architecture`、brief の判定案・
   根本原因・必須欄、JSON 失敗位置の印字、見積もりの批評者控除とプロファイル別定数）、
   E27・E28 と費用ゲートの再通過規則は SKILL.md の文言。
+- **2026-11-08 E2E 第 4 走（web-fetch / standard / --prior run-1）**: 56 回・約 6.2M
+  トークンで完走（confirmed 6 / needs_validation 0 / rejected 6、見積もり 55〜60 回に一致。
+  費用ゲートは批評者が単位を追加した時点で 1 回再通過、54 → 64）。持ち越しが初めて働き、
+  run-1 の rejected が再報告 1 件を抑え、修正済みの 7 件は再検証を費やさず列挙された。
+  記録は `docs/ja/reviews/2026-11-08-e2e-standard-web-fetch.ja.md`。学び E29〜E36 を
+  区切り (9) の候補として記録: 閉じタグの nonce、`prior_needs_validation_changed_source`、
+  検証者 brief の trace / evidence 必須欄、個人識別子とローカルパスを返答に綴らせない
+  （スクリプトが拒む）、見積もりに再検証者、hunter brief にファイル一覧、報告書の置換行の
+  種別。Phase 3（4 走）はこれで完了。

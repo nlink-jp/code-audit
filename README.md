@@ -8,9 +8,10 @@ covered in a ledger. Design: the [RFP](docs/en/code-audit-rfp.md)
 > **Status: under construction — Phase 1 complete, not yet released.** The
 > bookkeeping scripts, the data contracts, the hunting classes and the
 > six-phase SKILL.md exist for both profiles, with tests over a fixture
-> repository. What remains before v0.1.0 is Phase 3: end-to-end runs on two
-> real repositories with the cost recorded, and the independent verification
-> pass over the implementation.
+> repository. Phase 3 is done: four end-to-end runs on two real repositories
+> with the cost recorded (`docs/{ja,en}/reviews/`) and two independent
+> verification rounds over the implementation. What remains before v0.1.0 is
+> the last cut of lessons from the fourth run and the release.
 
 **What it will do.** The parent agent runs six phases over isolated
 sub-agents: reconnaissance; coverage-led hunting waves; adversarial validation

@@ -142,10 +142,20 @@
   re-asks; SKILL.md keeps whole-tree units alone with their hunter, passes
   the cost gate again only on a shortfall the books show, and lets verifiers
   read pinned dependencies and GOROOT, cited in prose. 97 tests.
+- Fourth end-to-end run (2026-11-08, `web-fetch`, standard with `--prior`:
+  56 launches, about 6.2M tokens, on the estimate; 6 confirmed / 0
+  needs_validation / 6 rejected, 2 of 12 records replaced on re-verification
+  without strengthening; record in
+  `docs/{ja,en}/reviews/2026-11-08-e2e-standard-web-fetch*.md`). Lessons
+  E29–E36 recorded as candidates for cut 9: the nonce on the closing wrapper
+  tag; `prior_needs_validation_changed_source`; trace and evidence required
+  fields in the verifier's brief; personal identifiers and local paths never
+  spelled in a return, refused by the scripts; re-verifiers in the estimate;
+  a file listing in the hunter's brief; the report's replacement line by
+  kind of difference.
 
 ### Planned for 0.1.0
 
-Phase 3: three of the four end-to-end runs are done (`webhook-relay` quick
-and standard, `web-fetch` quick; records in `docs/{ja,en}/reviews/`) and cut 8
-is applied. Left: the `web-fetch` standard run with `--prior` (estimated 55–60
-launches, about 5.5–6M tokens), release per the organization checklist.
+Phase 3's four end-to-end runs are done (`webhook-relay` quick and standard,
+`web-fetch` quick and standard; records in `docs/{ja,en}/reviews/`). Left:
+cut 9 (E29–E36), then release per the organization checklist.

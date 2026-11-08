@@ -530,3 +530,16 @@ independent pass), it sits beside compliance-review and incident-review.
   briefs' proposed verdict, root cause and required fields, the JSON failure
   context, the estimate's critic subtraction and per-profile constants);
   E27, E28 and the rule for passing the cost gate again as SKILL.md wording.
+- **2026-11-08 E2E run 4 (web-fetch / standard / --prior run-1)**: 56
+  launches, about 6.2M tokens (confirmed 6 / needs_validation 0 / rejected 6,
+  on the 55–60 estimate; the cost gate was passed once more when the critic
+  added a unit, 54 → 64). Carry-over worked for the first time: one of run-1's
+  rejections suppressed a re-report and the seven fixed records cost no
+  re-verification. Record in
+  `docs/en/reviews/2026-11-08-e2e-standard-web-fetch.md`. Lessons E29–E36
+  recorded as candidates for cut (9): the nonce on the closing tag,
+  `prior_needs_validation_changed_source`, trace / evidence required fields
+  in the verifier's brief, personal identifiers and local paths never spelled
+  in a return (refused by the scripts), re-verifiers in the estimate, a file
+  listing in the hunter's brief, the report's replacement line by kind. Phase
+  3 (four runs) is complete.
