@@ -115,6 +115,21 @@
   step, the briefs and schema parts by reference; the two leftover "Refines
   generic" sentences in `cli.md` removed. 92 tests.
 
+- Second end-to-end run (2026-11-08, `webhook-relay`, standard with `--prior`:
+  42 launches, about 3.9M tokens, 0 confirmed / 2 needs_validation / 7
+  rejected; record in `docs/{ja,en}/reviews/2026-11-08-e2e-standard-webhook-relay*.md`)
+  and cut (7), its lessons: `seed --prior` matches prior units by
+  surface × boundary × class when the coverage id's subsystem token differs
+  (a quick prior under standard carried over instead of `unlinked_prior`;
+  carried records take this run's ids, listed as `remapped_prior`); a unit
+  the critic adds to a run with priors is `new`; `ledger.py brief` gains the
+  `hunter` (assigned units with verbatim class text) and `reverifier`
+  (decided record, units, logs) roles; the estimate assumes 0.35 candidates
+  per unit and 10% re-asks; the report's replacement line no longer claims a
+  second verifier when nothing was strengthened; SKILL.md names the briefs
+  for every role, states the critic's types, and allows verification between
+  waves. Deferred: E20 (a `brief critic --since-wave` delta). 94 tests.
+
 ### Planned for 0.1.0
 
 Phase 3: the `webhook-relay` standard run is done (2026-11-08: 42 launches,

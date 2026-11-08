@@ -105,7 +105,11 @@ a counted launch is counted again only as a declared re-ask (`run.py count
 printed from the books (`ledger.py brief`) so no coverage id is retyped;
 toolchain caches land under the run and downloads are off (`run.py exec`);
 the estimate counts hunters by grouping and budgets re-asks; `lead` notes
-reach the next run's critic through `seed --prior`.
+reach the next run's critic through `seed --prior`. From the second run
+(`docs/en/reviews/2026-11-08-e2e-standard-webhook-relay.md`): every role's
+input is printed from the books (`ledger.py brief hunter|critic|verifier|reverifier`),
+and a prior run of the other profile still carries over, matched by
+surface × boundary × class.
 Residual risks are in the RFP: the target's own tests run unsandboxed as
 your user, and whether a sub-agent really has no shell depends on the agent
 type the runtime offers.

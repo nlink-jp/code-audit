@@ -441,3 +441,10 @@ compliance-review / incident-review と並ぶ。
   束ねと再依頼を数える、exec はツールチェーンのキャッシュを run 配下に置き
   ダウンロードを切る、`lead` ノートは次走へ。見積もりの定数（3 単位/ハンター・
   候補 0.5/単位・再依頼 20%）は 1 走の実測であり、残り 3 走で見直す。
+- **2026-11-08 E2E 第 2 走（webhook-relay / standard / --prior run-1）と区切り (7)**:
+  42 回・約 3.9M トークンで完走（confirmed 0 / needs_validation 2 / rejected 7、
+  見積もり 63 回の 2/3）。記録は `docs/ja/reviews/2026-11-08-e2e-standard-webhook-relay.ja.md`。
+  学び E13〜E19 を採用: 別プロファイルの prior は surface×boundary×class で突き合わせる、
+  批評者追加の単位も prior_status を持つ、`brief` に hunter と reverifier、見積もり
+  定数は 2 走の実測（0.35 / 10%）、置換行の文言、批評者の契約に型を明記、波の間の検証を
+  許す。E20（批評者 brief の差分化）は単位数が増えるまで保留。

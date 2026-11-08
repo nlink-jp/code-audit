@@ -504,3 +504,13 @@ independent pass), it sits beside compliance-review and incident-review.
   caches under the run with downloads off, `lead` notes carried to the next
   run. The estimate's constants (3 units per hunter, 0.5 candidates per unit,
   20% re-asks) come from one pass and are revisited over the remaining three.
+- **2026-11-08 E2E run 2 (webhook-relay / standard / --prior run-1) and cut (7)**:
+  42 launches and about 3.9M tokens (confirmed 0 / needs_validation 2 /
+  rejected 7; two thirds of the 63-launch estimate); record in
+  `docs/en/reviews/2026-11-08-e2e-standard-webhook-relay.md`. Lessons E13–E19
+  adopted: a prior of the other profile is matched by surface × boundary ×
+  class, critic-added units carry a prior status, `brief` gains the hunter
+  and reverifier roles, the estimate's constants come from both runs (0.35 /
+  10%), the replacement line's wording, the critic contract states its types,
+  verification may run between waves. E20 (a delta critic brief) is deferred
+  until the unit count calls for it.

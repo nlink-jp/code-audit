@@ -38,7 +38,7 @@ Bundled scripts (stdlib-only Python 3.9+; `--help` on each):
 | Script | Subcommands | Owns |
 |--------|-------------|------|
 | `run.py` | `init`, `approve [--budget N]`, `nonce`, `set-budget`, `count [--agent [--rerun]]`, `set-status`, `validate`, `exec` | `run-metadata.json`, `checks/<id>.log`, `cache/` (toolchain caches `exec` redirects) |
-| `ledger.py` | `seed [--prior]`, `assign`, `record`, `merge-critic`, `merge-candidates`, `brief critic|verifier`, `decide`, `defer`, `abandon`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json` (and appends hunter notes to `notes.json`) |
+| `ledger.py` | `seed [--prior]`, `assign`, `record`, `merge-critic`, `merge-candidates`, `brief hunter|critic|verifier|reverifier`, `decide`, `defer`, `abandon`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json` (and appends hunter notes to `notes.json`) |
 | `findings.py` | `validate`, `add [--replace --by <agent> [--confirmed-by <agent>]]`, `digest`, `note` | `findings.json`, `replacements.json`, `notes.json` (`digest` writes back the record file it is given) |
 | `compile.py` | (run dir) | `REPORT.ja.md`, `REPORT.md`, `NEEDS-VALIDATION.ja.md`, `NEEDS-VALIDATION.md` |
 | `classes.py` | `list`, `size`, `check-knowledge [--adr] [--origin]` | nothing; checks `classes/*.md` |
@@ -129,11 +129,19 @@ code-audit/
   `ledger.py merge-candidates --keep --duplicate... --reason` folds
   duplicate claims before verification (the kept candidate takes the union
   of coverage ids, duplicates go to `merged` and never get a record);
-  `ledger.py brief critic|verifier` prints the sub-agent's input from the
+  `ledger.py brief hunter|critic|verifier|reverifier` prints the sub-agent's input from the
   books; `estimate_numbers` groups `UNITS_PER_HUNTER` units per hunter,
   expects `CANDIDATES_PER_UNIT` and budgets `RERUN_RATE` re-asks (measured
   on the first E2E); `run.py exec` redirects toolchain caches under
   `RUN/cache/` and forbids downloads; fingerprints may lead with a dot.
+- **Cut 7 (second E2E)**: `seed --prior` matches a prior unit by
+  surface × boundary × class when its coverage id does not match (a quick
+  prior under standard, or the reverse) and rewrites a carried record's
+  `coverage_ids` to this run's (`remapped_prior`); a unit `merge-critic`
+  adds to a run with priors is `new`; `brief hunter --agent` and
+  `brief reverifier --fingerprint` complete the roles; the estimate's
+  constants are 0.35 candidates per unit and 10% re-asks; the report's
+  replacement line varies with the strengthened count.
 - **`decide` requires the record first** (`findings.py add`), then links the
   fingerprint to units; a carried record on a still-planned unit needs
   `--agent` (the verifier becomes the owner).

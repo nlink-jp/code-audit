@@ -136,7 +136,10 @@ one verification stage, and the subsystem dimension collapsed so units are
 coarser. The sections marked *standard* below do not run under `quick`.
 
 **Prior runs.** Pass every earlier run of the same repository as `--prior`
-to `run.py init` here and to `ledger.py seed` in Phase 1. `seed` then marks
+to `run.py init` here and to `ledger.py seed` in Phase 1. A prior of the
+other profile still carries over: its coverage ids differ only in the
+subsystem token, and `seed` matches its units by surface × boundary × class
+(`remapped_prior` in its output names the records it re-pointed). `seed` then marks
 each unit's `prior_status` (what the last run concluded for the same
 coverage id, and whether its cited sources changed), queues the prior
 `confirmed` and `needs_validation` records whose cited sources are unchanged
@@ -299,10 +302,11 @@ and remember to end the run `incomplete`.
 **Hunter prompt**, in this order:
 
 1. The security preamble in two sentences.
-2. The assigned units: coverage id, surface, boundary, subsystem, starting
-   paths, the unit's `prior_status` with its meaning (below), and the
-   **verbatim text of each selected class** from the class files (only those
-   classes; the prompt stays small). For a `prior_confirmed_*` or
+2. The output of `ledger.py brief RUN hunter --agent hunter-N` verbatim:
+   the assigned units (coverage id, surface, boundary, subsystem, starting
+   paths, `prior_status`) and the **verbatim text of each selected class**
+   (only those classes; the prompt stays small), plus the one line below
+   that gives the `prior_status` its meaning. For a `prior_confirmed_*` or
    `prior_needs_validation` unit add the prior record's fingerprint, title
    and root cause, read from the prior run's findings file (a file the parent
    reads; nothing is written there).
@@ -404,7 +408,11 @@ inside `<target-data>`. It returns one `critic_result`
 no unit covers, each with a `reason`; `reassign_ids[]` as
 `[{"coverage_id", "reason"}]` for units whose checks did not read what the
 invariant needs; `resolved_prior_leads[]` as `[{"fingerprint", "reason"}]`;
-`stop`. Negative space: the critic does not hunt, does not judge candidates,
+`stop`. Types matter: `priority` is an integer (1 = reachable by the
+lowest-trust principal) and every class reference is spelled exactly as the
+heading reads, with plain spaces (`classes/generic.md#Access control`, never
+`%20`); the script refuses anything else and the critic is re-asked.
+Negative space: the critic does not hunt, does not judge candidates,
 does not reassign a unit whose candidates are still pending (it proposes the
 missed surface as a missing unit instead), and sets `stop` true only when
 both lists are empty. A proposal the ledger already has comes back as
@@ -429,7 +437,10 @@ reassigned units to `planned` with their first attempt archived (a fresh
 hunter must take them; `assign` refuses the previous owner). Its output says
 `work_remaining`. While it is true: assign and run hunters for the planned
 units as above (wave 2, 3, ...), then launch the next critic
-(`critic-2`, ...), each time with the current ledger status. Stop the waves
+(`critic-2`, ...), each time with the current ledger status. Candidates a
+wave produced may be verified (Phase 4) while the next wave hunts: nothing
+in the books depends on the order, and a decided candidate lets a later
+critic reassign its unit. Stop the waves
 when a critic returns `stop: true` with nothing to add or reassign, or when
 the reserve for verification would be spent — then defer what is planned
 with `ledger.py defer RUN --all-planned --reason budget_reserved_for_verification`
@@ -536,11 +547,12 @@ neither the hunter's nor the verifier's prompt. For each fingerprint launch
 `reverifier-N` with:
 
 1. The preamble.
-2. The record verbatim inside `<target-data>` (its trace and evidence are
-   the whole claim), the unit's surface and boundary, the class text, and
-   the `checks/` logs that touch its paths (inside `<target-data>`, with
-   `exit_code` / `timed_out` stated). Not the verifier's `layers_examined`:
-   the point is an independent reconstruction.
+2. The output of `ledger.py brief RUN reverifier --fingerprint <fp>`
+   verbatim inside `<target-data>`: the record (its trace and evidence are
+   the whole claim), the facts of its units, and the `checks/` logs with
+   their `exit_code` / `timed_out`; plus the class text. The brief never
+   holds the verifier's `layers_examined`: the point is an independent
+   reconstruction.
 3. The task: read the cited lines and the layers around them, and decide
    whether the record is right as written. Return exactly one JSON object
    `{"agent_id", "decision": "keep" | "replace", "record", "changes": [{"field", "from", "to", "why"}], "notes": [...]}`

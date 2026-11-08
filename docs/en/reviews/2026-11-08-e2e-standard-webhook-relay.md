@@ -79,3 +79,9 @@ regression.
 |---|---|---|---|
 | web-fetch quick | 6.2k lines of Go, 41 files, plus the MCP-server class → 50–60 units | 4 + 18–20 + 1 + 18–21 + 4 re-asks ≈ 45–50 | 4.5–5M |
 | web-fetch standard | the same with two verification stages and 3 critics | 4 + 20 + 3 + 40 + 7 re-asks ≈ 75 | 7.5M |
+
+## Adopted in cut 7 (2026-11-08)
+
+E13–E19 were adopted (94 tests green). E20 is deferred: at 37 units the brief
+stays within 130 KB, so a delta brief waits until the unit count calls for it
+(risk assessment over perfection).
