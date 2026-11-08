@@ -686,8 +686,13 @@ def cmd_record(args: argparse.Namespace) -> None:
                 if chk.get("agent_id") != agent:
                     errors.append(f"{rb}.checks: every check is owned by {agent}")
                 union.update(chk.get("reviewed_paths", []) if isinstance(chk.get("reviewed_paths"), list) else [])
-        if ru["reviewed_paths"] and set(ru["reviewed_paths"]) != union:
-            errors.append(f"{rb}.reviewed_paths: must equal the union of the checks' reviewed_paths")
+        # A path read without a check is not coverage, so only the union of
+        # the checks' paths is stored; listing extra paths is harmless and
+        # accepted, but a check path missing from reviewed_paths is a
+        # contradiction and refused.
+        missing = union - set(ru["reviewed_paths"]) if ru["reviewed_paths"] else set()
+        if missing:
+            errors.append(f"{rb}.reviewed_paths: must include every path a check names; missing {sorted(missing)}")
         ru["reviewed_paths"] = sorted(union)
         errors += validate_checks(run_dir, ru["checks"], ru["reviewed_paths"], f"{rb}.checks")
         disp = ru["disposition"]

@@ -23,7 +23,7 @@ from urllib.parse import quote
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema.json"
 
 AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-FINGERPRINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$")
+FINGERPRINT_RE = re.compile(r"^(?=.*[A-Za-z0-9])[A-Za-z0-9.][A-Za-z0-9._:/@+-]*$")  # a dot-file such as .gitignore may lead
 CHECK_LOG_RE = re.compile(r"^checks/[a-z0-9][a-z0-9-]{0,63}\.log$")
 WINDOWS_DEVICES = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
 

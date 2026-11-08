@@ -574,6 +574,12 @@ class LedgerTests(RunFixture):
         self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-2", u2), "cannot take another hunter")
         # S8: ids registered by count, by a critic, or by a note are used ids
         self.ok(run("run.py", "count", str(self.run_dir), "verifier", "--agent", "verifier-9"))
+        # E1 (E2E 2026-11-08): a counted id is counted again only as a declared re-run
+        self.refused(run("run.py", "count", str(self.run_dir), "verifier", "--agent", "verifier-9"), "already counted")
+        self.refused(run("run.py", "count", str(self.run_dir), "verifier", "--agent", "verifier-8", "--rerun"), "never counted")
+        self.refused(run("run.py", "count", str(self.run_dir), "verifier", "--rerun"), "--rerun needs --agent")
+        out = self.ok(run("run.py", "count", str(self.run_dir), "verifier", "--agent", "verifier-9", "--rerun"))
+        self.assertEqual(out["invocations"]["verifier"], 2)
         self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "40"))
         self.refused(run("ledger.py", "assign", str(self.run_dir), "--agent", "verifier-9", u2), "already used in this run")
         self.ok(run("findings.py", "note", str(self.run_dir), "--agent", "critic-3", "--kind", "hardening", "--text", "x"))
@@ -804,8 +810,8 @@ class LedgerTests(RunFixture):
         result["units"][0]["checks"][0]["agent_id"] = "hunter-9"
         self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "owner.json"))), "every check is owned by hunter-1")
         result = self.hunter_result()
-        result["units"][0]["reviewed_paths"] = ["app/files.py", "tests/test_files.py"]
-        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "union.json"))), "must equal the union")
+        result["units"][0]["reviewed_paths"] = ["tests/test_files.py"]
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "union.json"))), "must include every path a check names")
         result = self.hunter_result()
         result["units"][1]["checks"][0]["check_log"] = "checks/missing.log"
         self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "nolog.json"))), "does not exist in the run directory")
@@ -821,6 +827,19 @@ class LedgerTests(RunFixture):
         result = self.hunter_result()
         result["candidates"][0]["evidence"][0]["file"] = "/etc/passwd"
         self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "abs.json"))), "repository-relative")
+
+    def test_record_accepts_extra_reviewed_paths_and_stores_the_union(self) -> None:
+        # E3 (E2E 2026-11-08): a path read without a check is not coverage, so
+        # the extra path is dropped, not refused.
+        self.seed()
+        self.ok(run("run.py", "exec", str(self.run_dir), "unit-tests", "--target", str(self.target)))
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1, u2))
+        result = self.hunter_result()
+        result["units"][0]["reviewed_paths"] = ["app/files.py", "tests/test_files.py"]
+        self.ok(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "superset.json"))))
+        unit = next(u for u in self.ledger() if u["coverage_id"] == u1)
+        self.assertEqual(unit["reviewed_paths"], ["app/files.py"])
 
     def test_seed_and_critic_pin_reference_and_state_rules(self) -> None:
         props = json.loads((FIXTURES / "units.json").read_text(encoding="utf-8"))
@@ -1367,6 +1386,9 @@ class CompileTests(RunFixture):
         self.assertEqual(compile_module.code("x` injected `y"), "x' injected 'y")
         self.assertFalse(contract.is_agent_id("hunter-1\n"))
         self.assertFalse(contract.is_fingerprint("a:b:c\n"))
+        # E4 (E2E 2026-11-08): a dot-file may lead a fingerprint; dots alone are not one
+        self.assertTrue(contract.is_fingerprint(".gitignore:deploy-env-not-ignored"))
+        self.assertFalse(contract.is_fingerprint("..."))
         self.assertEqual(contract.validate_part({"agent_id": "hunter-1\n", "kind": "hardening", "text": "x"}, "note"), ["$.agent_id: 'hunter-1\n' does not match pattern ^[a-z0-9][a-z0-9_-]{0,63}$"])
         # a record carrying a terminal escape in prose is refused before it is written
         self.hunt()

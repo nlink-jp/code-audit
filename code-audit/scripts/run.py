@@ -414,8 +414,18 @@ def cmd_count(args: argparse.Namespace) -> None:
         if not c.is_agent_id(args.agent):
             c.die(f"'{args.agent}' is not a canonical agent id")
         agents = meta.setdefault("agents", [])
+        # A registered id is a launch that already happened. Counting it
+        # again is either a second launch of the same agent (a re-ask with
+        # the validator's errors, which --rerun says) or a bookkeeping slip
+        # that would overstate what the user paid for.
+        if args.agent in agents and not args.rerun:
+            c.die(f"{args.agent}: already counted; pass --rerun when this is a second launch of the same agent")
+        if args.rerun and args.agent not in agents:
+            c.die(f"{args.agent}: --rerun names an agent that was never counted")
         if args.agent not in agents:
             agents.append(args.agent)
+    elif args.rerun:
+        c.die("--rerun needs --agent")
     meta["invocations"][args.role] += args.n
     total = sum(meta["invocations"].values())
     over = meta["budget"] is not None and total > meta["budget"]
@@ -596,6 +606,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("role", choices=ROLES)
     p.add_argument("--n", type=int, default=1)
     p.add_argument("--agent", help="agent id of the launched sub-agent; recorded so no later agent reuses it")
+    p.add_argument("--rerun", action="store_true", help="this is a second launch of an agent already counted (a re-ask with the errors)")
     p.set_defaults(func=cmd_count)
 
     p = sub.add_parser("set-status")
