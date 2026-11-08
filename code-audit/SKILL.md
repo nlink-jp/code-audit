@@ -69,7 +69,8 @@ Decide from the user's request before creating anything:
 - `RUN`: the output directory `run.py init` prints as `output_dir`. The raw
   returns of sub-agents are saved by the parent under `RUN/agents/<agent-id>.json`
   (create the directory with `mkdir -p RUN/agents` once) before a script
-  applies them; `RUN/architecture.md`, `RUN/commands.json` and
+  applies them; `findings.py digest` is the one script that writes back into
+  such a file; `RUN/architecture.md`, `RUN/commands.json` and
   `RUN/proposals.json` are the parent's own reconnaissance artifacts.
 - **The files in RUN are the state of the run.** After a context compaction,
   or whenever memory and the books disagree, re-read `ledger.py status RUN`
@@ -79,9 +80,12 @@ Decide from the user's request before creating anything:
   `findings.json` and `replacements.json` by `findings.py`; `notes.json` by `ledger.py record` and `findings.py note`.
 - Agent ids: `recon-a`..`recon-d`, `hunter-1`, `critic-1`, `verifier-1`,
   `reverifier-1` ... (`^[a-z0-9][a-z0-9_-]{0,63}$`). An id is used once per
-  run; `ledger.py assign` and `decide` refuse a used one. Count every
-  sub-agent invocation at once with `run.py count RUN <role>`, roles
-  `reconnaissance` / `hunter` / `critic` / `verifier` / `reverifier`.
+  run; `ledger.py assign` and `decide` refuse a used one. **Count every
+  launch when it happens, before its return is applied** — a discarded
+  return cost an invocation too: `run.py count RUN <role> --agent <id>`,
+  roles `reconnaissance` / `hunter` / `critic` / `verifier` / `reverifier`.
+  Hunters are the exception: `ledger.py assign` counts the launch it
+  authorises, so only a re-run of a hunter is counted by hand.
 - Data contracts: `SKILL_DIR/schema.json`. Hand a sub-agent the parts it
   must return (by pasting them): hunters get `hunter_result`, `check`,
   `finding_confirmed`, `finding_needs_validation`, `trace_entry`,
@@ -131,9 +135,14 @@ to `run.py init` here and to `ledger.py seed` in Phase 1. `seed` then marks
 each unit's `prior_status` (what the last run concluded for the same
 coverage id, and whether its cited sources changed), queues the prior
 `confirmed` and `needs_validation` records whose cited sources are unchanged
-as **carried** candidates for re-verification, and lists prior `rejected`
-claims with unchanged sources as **suppressed**: the same claim is not
-reported again, but the unit is still hunted.
+as **carried** candidates for re-verification, lists prior `rejected`
+claims with unchanged sources as **suppressed** (the same claim is not
+reported again, but the unit is still hunted), and lists prior `confirmed`
+and `needs_validation` records whose sources changed as **changed_prior**:
+they are not carried — the unit is hunted afresh with its `prior_status` as
+the pointer — and the report names them beside this run's verdicts. The
+same prior given twice counts once; priors are read oldest first, so the
+latest run's verdict wins where they disagree.
 
 ## Phase 1 — Reconnaissance (four roles, in parallel, read-only)
 
@@ -211,12 +220,14 @@ class that applies:
   class reference and any class that refines it for this surface;
   `excluded_classes` is `[{"block": "classes/<file>.md#<Heading>", "reason": "..."}]`.
 - Always consider every class of `generic.md`. Add the product-type file(s)
-  recon-a named. When a product-type class refines a generic one for the same
-  surface (the file says which lessons it carries), the unit takes the
-  product-type class and lists the generic one in `excluded_classes` with
-  reason `refined by classes/<file>.md#<Heading>` — one check, one unit.
-  Every other class you considered and left out goes there with its reason;
-  an unexplained omission is a coverage gap the critic will raise.
+  recon-a named. A product-type class says which generic class it sharpens
+  in its `Refines:` line (`classes.py list` prints it). On a surface where
+  such a class applies, take it, and exclude the generic class with reason
+  `refined by classes/<file>.md#<Heading>` **only when the generic class's
+  other lessons do not apply to that surface** — read the generic text
+  first; where they still apply, keep both units. Every other class you
+  considered and left out goes there with its reason; an unexplained
+  omission is a coverage gap the critic will raise.
 - `starting_paths`: the files a hunter reads first. `priority` 1 for the
   surfaces the lowest-trust principal reaches.
 
@@ -294,15 +305,16 @@ and remember to end the run `incomplete`.
    `existing_test`, `null` for `source`). `candidates[]`: one record per
    fingerprint with `proposed_verdict` (`confirmed` or `needs_validation`;
    never a `verdict` key) and every field the matching `finding_*` part
-   requires except `verdict` — for `confirmed`: `title`, `description`,
-   `root_cause`, `intended_behavior`, `trace` (entrypoint → propagation →
+   requires except `verdict` — for `confirmed`: `fingerprint`, `title`,
+   `description`, `root_cause`, `intended_behavior`, `trace` (entrypoint → propagation →
    sink), `evidence` at `file:line`, `conditions`, `source_digests` as `{}`,
    `evidence_kind`, `check_log`, `observed_result` (what the source or the
    log shows happens), `remediation` with `strategy` and `code_changes`,
    `severity`, `confidence` (at most `medium` when source-only),
    `coverage_ids` (every assigned unit that lists the fingerprint); for
-   `needs_validation`: `title`, `description`, `claimed_root_cause`, `trace`,
-   `evidence`, `source_digests` as `{}`, `blockers` (at least one),
+   `needs_validation`: `fingerprint`, `title`, `description`,
+   `claimed_root_cause`, `trace`, `evidence`, `source_digests` as `{}`,
+   `blockers` (at least one),
    `validation_plan` with `local` and/or `deployment`, `coverage_ids`.
    `notes[]` as `{"kind": "hardening" | "out_of_scope", "text", "coverage_id"?}`;
    `uncovered[]` as `{"surface", "boundary", "subsystem", "attack_class", "starting_paths", "reason"}`
@@ -327,34 +339,40 @@ source changed: read that change first, the fix may be partial;
 `prior_needs_validation` — an open lead sits here: read its blocker and say
 whether the current source settles it; `prior_rejected_claim_changed` — a
 rejected claim's source changed: the rejection may no longer hold;
-`prior_deferred` / `prior_blocked` — never actually hunted before: treat as
-new; `prior_out_of_scope` — excluded last time: say why it is in scope now.
+`prior_deferred` — never actually hunted before: treat as new;
+`prior_blocked` — the last run stopped on an unresolved fact (or left a
+candidate undecided): give the hunter that unit's `unresolved` from the
+prior run's ledger and ask whether the current source settles it;
+`prior_out_of_scope` — excluded last time: say why it is in scope now.
 
 **Apply.** Save the return to `RUN/agents/hunter-N.json`, fill the
-candidates' digests, record, count:
+candidates' digests, record (the launch was counted by `assign`):
 
 ```
 python3 SKILL_DIR/scripts/findings.py digest RUN/agents/hunter-N.json --target TARGET
 python3 SKILL_DIR/scripts/ledger.py record RUN RUN/agents/hunter-N.json
-python3 SKILL_DIR/scripts/run.py count RUN hunter
 ```
 
 `record` applies the whole result or nothing: every assigned unit present,
 every claimed fingerprint backed by a record that passes the findings bar,
 reviewed paths consistent, a claim a prior run rejected with unchanged
 sources noted but not queued. On failure re-run the hunter once with the
-error list appended; if it fails again,
+error list appended (count that second launch:
+`run.py count RUN hunter --agent hunter-N`); if it fails again,
 `ledger.py abandon RUN --agent hunter-N --reason <text>` returns its units
 to `planned` for a fresh hunter or for `ledger.py defer`. A `blocked` unit
 stays blocked until a critic reassigns it or the parent defers it with its
 reason (`ledger.py defer RUN --reason <text> <coverage-id>`).
 
 **Critic.** When no unit is `planned` (or the reserve stops hunting), launch
-one critic with: the preamble, `RUN/architecture.md`, the output of
-`ledger.py status RUN` (counts, planned ids, the `uncovered` entries hunters
-returned, the `blocked` units with their unresolved facts), every unit's
-invariants and reviewed paths from the hunter returns, the candidate titles
-(inside `<target-data>`), and the class list. It returns one `critic_result`
+one critic (`run.py count RUN critic --agent critic-N` at launch) with: the
+preamble, `RUN/architecture.md`, the output of `ledger.py status RUN`
+(counts, planned ids, the `uncovered` entries hunters returned, the
+`blocked` units with their unresolved facts), every unit's invariants and
+reviewed paths from the hunter returns, the candidate titles, and the class
+list. Everything that a hunter wrote after reading the target — invariants,
+check results, unresolved facts, `uncovered` reasons, candidate titles — goes
+inside `<target-data>`. It returns one `critic_result`
 (schema parts `critic_result` and `unit_proposal`, pasted):
 `missing_units[]` — full unit proposals, in the Phase 1 shape, for surfaces
 no unit covers, each with a `reason`; `reassign_ids[]` as
@@ -368,7 +386,6 @@ both lists are empty. A proposal the ledger already has comes back as
 
 ```
 python3 SKILL_DIR/scripts/ledger.py merge-critic RUN RUN/agents/critic-1.json --target TARGET
-python3 SKILL_DIR/scripts/run.py count RUN critic
 ```
 
 Give the critic, when prior runs exist, the `suppressed` list and the
@@ -398,7 +415,8 @@ needs the remaining budget to cover it, or the run stops with the third.
 `ledger.py status RUN` lists `pending_candidates` and `pending_carried`.
 Verify the **carried** records first (they are known leads, and the budget
 reserve counts them), then the new candidates. For each fingerprint launch a
-verifier that has never seen the hunter's prompt, with:
+verifier that has never seen the hunter's prompt
+(`run.py count RUN verifier --agent verifier-N` at launch), with:
 
 1. The preamble.
 2. The candidate record verbatim inside `<target-data>` (without the
@@ -427,8 +445,8 @@ verifier that has never seen the hunter's prompt, with:
    where `record` is the full finding in the shape of the verdict — the
    pasted `finding_confirmed` / `finding_needs_validation` /
    `finding_rejected` part, with `verdict` set — keeping the candidate's
-   fingerprint and `coverage_ids`, and no `agent_id` or `proposed_verdict`
-   key. A `rejected` or `needs_validation` record names the cause as
+   fingerprint, `coverage_ids` and, when present, `carried_from`, and no
+   `agent_id` or `proposed_verdict` key. A `rejected` or `needs_validation` record names the cause as
    `claimed_root_cause` and carries no severity, confidence, evidence kind,
    remediation, intended behaviour or conditions; a `rejected` record adds
    `reason`.
@@ -447,7 +465,6 @@ decide, count:
 python3 SKILL_DIR/scripts/findings.py digest RUN/agents/verifier-N.json --target TARGET
 python3 SKILL_DIR/scripts/findings.py add RUN RUN/agents/verifier-N.json --target TARGET
 python3 SKILL_DIR/scripts/ledger.py decide RUN --fingerprint <fp> --verdict <verdict> [--agent verifier-N]
-python3 SKILL_DIR/scripts/run.py count RUN verifier
 ```
 
 `findings.py add` enforces the bar (rules 1 and 2, trace order, relative
@@ -471,10 +488,11 @@ neither the hunter's nor the verifier's prompt. For each fingerprint launch
 `reverifier-N` with:
 
 1. The preamble.
-2. The record verbatim (its trace and evidence are the whole claim), the
-   unit's surface and boundary, the class text, and the `checks/` logs that
-   touch its paths. Not the verifier's `layers_examined`: the point is an
-   independent reconstruction.
+2. The record verbatim inside `<target-data>` (its trace and evidence are
+   the whole claim), the unit's surface and boundary, the class text, and
+   the `checks/` logs that touch its paths (inside `<target-data>`, with
+   `exit_code` / `timed_out` stated). Not the verifier's `layers_examined`:
+   the point is an independent reconstruction.
 3. The task: read the cited lines and the layers around them, and decide
    whether the record is right as written. Return exactly one JSON object
    `{"agent_id", "decision": "keep" | "replace", "record", "changes": [{"field", "from", "to", "why"}], "notes": [...]}`
@@ -485,9 +503,10 @@ neither the hunter's nor the verifier's prompt. For each fingerprint launch
    not strengthen on inference — a stronger claim needs the same evidence a
    verifier would need; do not run or write anything.
 
-**Apply.** `run.py count RUN reverifier` per launch. For `keep`, nothing
-else. For `replace`, save the return to `RUN/agents/reverifier-N.json`, run
-`findings.py digest` on it, then:
+**Apply.** `run.py count RUN reverifier --agent reverifier-N` at launch.
+Save the return to `RUN/agents/reverifier-N.json` and pass its `notes`
+through `findings.py note` as in Phase 4. For `keep`, nothing else. For
+`replace`, run `findings.py digest` on the saved return, then:
 
 ```
 python3 SKILL_DIR/scripts/findings.py add RUN RUN/agents/reverifier-N.json --replace --by reverifier-N --target TARGET
@@ -522,13 +541,18 @@ In `quick` this phase does not run: the Phase 4 verifier's record is final.
 ## Phase 6 — Report
 
 1. Record how the run ended: `run.py set-status RUN complete` (it refuses
-   while a unit is `planned` or `in_progress` or a candidate is undecided),
-   or `run.py set-status RUN incomplete --reason <reason>` with one of
+   while a unit is `planned`, `in_progress` or `blocked`, a unit was deferred
+   for budget, a candidate is undecided, or the records and the ledger
+   disagree — it runs both validators first), or
+   `run.py set-status RUN incomplete --reason <reason>` with one of
    `stopped_at_cost_gate`, `budget_reserved_for_verification`,
-   `verification_incomplete`, `reverification_incomplete`,
-   `checks_unavailable`, or another short reason — whenever a unit was
-   deferred for budget, a candidate stayed pending, a re-verification was not
-   reached, or the user stopped early.
+   `verification_incomplete`, `reverification_incomplete`, or another short
+   reason — whenever a unit was deferred for budget, a candidate stayed
+   pending, a re-verification was not reached, or the user stopped early.
+   An allowed test command that did not run (`checks_unavailable`) does not
+   by itself make the run incomplete: coverage was still read; the report
+   says which checks were unavailable and the affected claims are
+   `needs_validation`.
 2. Check and compile:
 
 ```
@@ -557,5 +581,7 @@ python3 SKILL_DIR/scripts/compile.py RUN
   Evidence is a `file:line` a verifier confirmed or a `checks/` log.
 - Launch a hunter before the cost gate's approval, a verifier that saw the
   hunter's prompt, or a re-verifier that saw the verifier's.
+- Count a launch only after its return was applied: a discarded return is
+  an invocation the user paid for.
 - Apply a strengthening replacement on its author's word: `findings.py add`
   refuses it until a different fresh verifier has confirmed it.
