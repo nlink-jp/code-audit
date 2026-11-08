@@ -11,6 +11,11 @@ Source: ADR-021, security.md#A check that refuses places must not write to test 
 
 Find every write and compare its destination with the work_dir contract.
 
+## Borrowed injection lens
+Source: origin:ATTACK-CLASSES.md#Injection, security.md#A check that refuses places must not write to test them
+
+Trace the caller's value to the sink; written in our words from the origin's lens.
+
 ```text
 ## not a class heading: inside a fence
 ```

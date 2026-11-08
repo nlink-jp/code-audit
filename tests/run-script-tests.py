@@ -1133,17 +1133,26 @@ class ClassesTests(unittest.TestCase):
         proc = run("classes.py", "list", "--classes", str(FIXTURES / "classes"))
         self.assertEqual(proc.returncode, 0, proc.stderr)
         classes = json.loads(proc.stdout)
-        self.assertEqual([c["name"] for c in classes], ["Path confinement after resolution", "Writes outside the declared work directory"])
+        self.assertEqual([c["name"] for c in classes], ["Path confinement after resolution", "Writes outside the declared work directory", "Borrowed injection lens"])
         self.assertEqual(classes[1]["sources"], ["ADR-021", "security.md#A check that refuses places must not write to test them"])
+        self.assertEqual(classes[2]["sources"], ["origin:ATTACK-CLASSES.md#Injection", "security.md#A check that refuses places must not write to test them"])
 
     def test_check_knowledge_verifies_headings(self) -> None:
         proc = run("classes.py", "check-knowledge", "--classes", str(FIXTURES / "classes"), "--knowledge", str(FIXTURES / "knowledge"))
         self.assertEqual(proc.returncode, 0, proc.stderr)
         out = json.loads(proc.stdout)
-        self.assertEqual((out["sources_checked"], out["adr_unchecked"]), (2, 1))
-        proc = run("classes.py", "check-knowledge", "--classes", str(FIXTURES / "classes"), "--knowledge", str(FIXTURES / "knowledge"), "--adr", str(FIXTURES / "adr"))
+        self.assertEqual((out["sources_checked"], out["adr_unchecked"], out["origin_unchecked"]), (3, 1, 1))
+        proc = run("classes.py", "check-knowledge", "--classes", str(FIXTURES / "classes"), "--knowledge", str(FIXTURES / "knowledge"), "--adr", str(FIXTURES / "adr"), "--origin", str(FIXTURES / "origin"))
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(json.loads(proc.stdout)["adr_unchecked"], 0)
+        out = json.loads(proc.stdout)
+        self.assertEqual((out["sources_checked"], out["adr_unchecked"], out["origin_unchecked"]), (5, 0, 0))
+        with tempfile.TemporaryDirectory() as tmp:
+            classes = Path(tmp) / "classes"
+            classes.mkdir()
+            (classes / "x.md").write_text("## Borrowed\nSource: origin:ATTACK-CLASSES.md#Business logic\n\nbody\n", encoding="utf-8")
+            proc = run("classes.py", "check-knowledge", "--classes", str(classes), "--knowledge", str(FIXTURES / "knowledge"), "--origin", str(FIXTURES / "origin"))
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("heading or block not found in the origin", proc.stderr)
 
     def test_check_knowledge_fails_on_a_missing_heading_or_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1156,7 +1165,7 @@ class ClassesTests(unittest.TestCase):
             self.assertIn("needs a Source: line", proc.stderr)
 
     def test_size_limit(self) -> None:
-        proc = run("classes.py", "size", "--classes", str(FIXTURES / "classes"), "--max-bytes", "8192")
+        proc = run("classes.py", "size", "--classes", str(FIXTURES / "classes"), "--max-bytes", "16384")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         proc = run("classes.py", "size", "--classes", str(FIXTURES / "classes"), "--max-bytes", "10")
         self.assertNotEqual(proc.returncode, 0)
@@ -1173,6 +1182,12 @@ class ClassesTests(unittest.TestCase):
         self.assertTrue(all(c["sources"] for c in classes), [c["name"] for c in classes if not c["sources"]])
         generic = {c["name"] for c in classes if c["file"] == "generic.md"}
         self.assertTrue({"Injection", "Access control", "Resource and file handling", "Cryptography and secrets", "Business logic", "Feature abuse", "Chained", "Wildcard", "Obvious things"} <= generic, generic)
+        # every generic class borrows the origin's lens beside the organization's own lessons
+        self.assertTrue(all(any(s.startswith("origin:ATTACK-CLASSES.md#") for s in c["sources"]) for c in classes if c["file"] == "generic.md"))
+        # one copy of each lesson: a server's CLI face is hunted with cli.md
+        names = [c["name"] for c in classes]
+        self.assertEqual(len(names), len(set(names)), "class names collide across files")
+        self.assertNotIn("Third-party text reaches a terminal or log raw", names)
     def test_source_split_keeps_commas_inside_headings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             classes = Path(tmp) / "classes"
