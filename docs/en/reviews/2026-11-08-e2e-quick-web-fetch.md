@@ -89,7 +89,10 @@ to hardening notes.
 
 E21–E28 all adopted (97 tests). E21–E26 in the scripts: `ledger.py architecture RUN`
 composes `architecture.md` from `agents/recon-*.json` (refusing a return with an
-absolute local path) and every `brief` refuses until it exists; the queue had kept the
+absolute local path; after the commit-time security review, every scalar is folded to
+one line so no value can open a heading, a list item or close `<target-data>`, and
+SKILL.md says the file enters a prompt only inside that tag) and every `brief` refuses
+until it exists; the queue had kept the
 hunter's proposal under `verdict`, so the briefs now present it as `proposed_verdict`
 with the root cause; `brief verifier` prints `required_fields` per verdict and the
 `file_rule` from the schema; `read_json` prints 60 characters around a failure; the

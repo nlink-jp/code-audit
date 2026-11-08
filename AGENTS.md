@@ -145,8 +145,10 @@ code-audit/
   constants are 0.35 candidates per unit and 10% re-asks; the report's
   replacement line varies with the strengthened count.
 - **Cut 8 (third E2E)**: `ledger.py architecture RUN` composes
-  `architecture.md` from `agents/recon-*.json` (refusing an absolute local
-  path) and every `brief` refuses until it exists; the candidate queue keeps
+  `architecture.md` from `agents/recon-*.json` (each scalar on one line, no
+  value may open a heading or close a `<target-data>` tag; a return holding
+  an absolute local path is refused) and every `brief` refuses until it
+  exists; the candidate queue keeps
   the hunter's proposal under `verdict`, which the briefs present as
   `proposed_verdict` with the root cause; `brief verifier` prints
   `required_fields` per verdict from the schema and the `file_rule`;

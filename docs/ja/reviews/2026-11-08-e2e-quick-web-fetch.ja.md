@@ -81,7 +81,9 @@ hardening に格下げ。
 ## 区切り (8) での採用（2026-11-08）
 
 E21〜E28 をすべて採用した（97 テスト緑）。E21〜E26 はスクリプト: `ledger.py architecture RUN` が
-`agents/recon-*.json` から `architecture.md` を組み（絶対ローカルパスを含む返答は拒む）、
+`agents/recon-*.json` から `architecture.md` を組み（絶対ローカルパスを含む返答は拒む。コミット時の
+セキュリティレビューの指摘で、値は 1 行に畳んで見出し・箇条書き・`</target-data>` を作れないようにし、
+SKILL に「architecture.md も `<target-data>` で包む」を明記）、
 無ければどの役の `brief` も印字しない。待ち行列は hunter の判定案を `verdict` に持っていたので、
 brief が `proposed_verdict` と根本原因として印字する。`brief verifier` は schema から判定ごとの
 `required_fields` と `file_rule` を印字する。`read_json` は失敗位置の前後 60 字を印字する。
