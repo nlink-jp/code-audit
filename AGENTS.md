@@ -26,7 +26,7 @@ v0.1.0 release.
 
 | Command | Purpose |
 |---------|---------|
-| `make check` (= `make test`) | Structural validation + script behaviour tests (71 tests) |
+| `make check` (= `make test`) | Structural validation + script behaviour tests (77 tests) |
 | `make install` | Build the zip and unpack it into `~/.claude/skills/code-audit` |
 | `make install DEST=<path>` | Unpack into a custom skills directory |
 | `make uninstall` | Remove the installed copy |

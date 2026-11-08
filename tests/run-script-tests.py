@@ -464,6 +464,22 @@ class RunPyTests(RunFixture):
         self.refused(run("run.py", "set-status", str(self.run_dir), "complete"), "not complete")
         self.ok(run("run.py", "set-status", str(self.run_dir), "incomplete", "--reason", "stopped"))
 
+    def test_exec_and_validate_pin_cwd_and_writes_rules(self) -> None:
+        outside = self.tmpdir / "outside"
+        outside.mkdir()
+        os.symlink(outside, self.target / "escape")
+        cmds = json.loads((FIXTURES / "commands.json").read_text(encoding="utf-8"))
+        cmds["commands"] = [dict(cmds["commands"][2], id="via-link", cwd="escape")]
+        (self.run_dir / "commands.json").write_text(json.dumps(cmds), encoding="utf-8")
+        self.ok(run("run.py", "validate", str(self.run_dir)))
+        self.refused(run("run.py", "exec", str(self.run_dir), "via-link", "--target", str(self.target)), "escapes the target")
+        cmds["commands"] = [dict(cmds["commands"][0], id="bad-writes", cwd=".", writes=["../out.txt"])]
+        (self.run_dir / "commands.json").write_text(json.dumps(cmds), encoding="utf-8")
+        self.refused(run("run.py", "validate", str(self.run_dir)), "must be repository-relative")
+        cmds["commands"] = [dict(cmds["commands"][0], id="abs-cwd", cwd="/tmp", writes=[])]
+        (self.run_dir / "commands.json").write_text(json.dumps(cmds), encoding="utf-8")
+        self.refused(run("run.py", "validate", str(self.run_dir)), "repository-relative path")
+
 
 class LedgerTests(RunFixture):
     def test_seed_derives_ids_and_digests(self) -> None:
@@ -714,6 +730,64 @@ class LedgerTests(RunFixture):
         bad["excluded_classes"] = [{"block": "classes/cli.md#Nope", "reason": "x"}]
         self.refused(run("ledger.py", "seed", str(self.run_dir), "--target", str(self.target), "--units", str(self.write_json([bad], "bad2.json"))), "no such class")
 
+    def test_record_pins_check_ownership_coverage_and_dispositions(self) -> None:
+        self.seed()
+        self.ok(run("run.py", "exec", str(self.run_dir), "unit-tests", "--target", str(self.target)))
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1, u2))
+        result = self.hunter_result()
+        result["units"][0]["checks"][0]["agent_id"] = "hunter-9"
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "owner.json"))), "every check is owned by hunter-1")
+        result = self.hunter_result()
+        result["units"][0]["reviewed_paths"] = ["app/files.py", "tests/test_files.py"]
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "union.json"))), "must equal the union")
+        result = self.hunter_result()
+        result["units"][1]["checks"][0]["check_log"] = "checks/missing.log"
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "nolog.json"))), "does not exist in the run directory")
+        result = self.hunter_result()
+        result["units"][0]["disposition"] = "blocked"
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "blocked.json"))), "blocked carries unresolved facts and no fingerprints")
+        result = self.hunter_result()
+        result["candidates"][0]["coverage_ids"] = [u1, "not-a-unit"]
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "foreign.json"))), "must be among the reported units")
+        result = self.hunter_result()
+        result["candidates"][0]["title"] = "   "
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "blank.json"))), "visible character")
+        result = self.hunter_result()
+        result["candidates"][0]["evidence"][0]["file"] = "/etc/passwd"
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "abs.json"))), "repository-relative")
+
+    def test_seed_and_critic_pin_reference_and_state_rules(self) -> None:
+        props = json.loads((FIXTURES / "units.json").read_text(encoding="utf-8"))
+        bad = json.loads(json.dumps(props[0]))
+        bad["canonical_refs"]["surface"] = "app/files.py#read_user_file\u200b"
+        self.refused(run("ledger.py", "seed", str(self.run_dir), "--target", str(self.target), "--units", str(self.write_json([bad], "zw.json"))), "control or format character U+200B")
+        self.seed()
+        u1, u2 = self.unit_ids()
+        critic = {"agent_id": "critic-1", "missing_units": [], "reassign_ids": [{"coverage_id": u1, "reason": "x"}], "resolved_prior_leads": [], "stop": False}
+        self.refused(run("ledger.py", "merge-critic", str(self.run_dir), str(self.write_json(critic, "c.json")), "--target", str(self.target)), "only blocked, covered or candidate units can be reassigned")
+
+    def test_validate_pins_the_ledger_invariants_on_a_hand_edited_file(self) -> None:
+        self.hunt()
+        ledger_path = self.run_dir / "coverage-ledger.json"
+        good = ledger_path.read_text(encoding="utf-8")
+        units = json.loads(good)
+        units.reverse()
+        ledger_path.write_text(json.dumps(units), encoding="utf-8")
+        self.refused(run("ledger.py", "validate", str(self.run_dir)), "sorted lexicographically")
+        units = json.loads(good)
+        cand_unit = next(u for u in units if u["status"] == "candidate")
+        cand_unit["decisions"] = {"app/files.py:nowhere:ghost": "confirmed"}
+        ledger_path.write_text(json.dumps(units), encoding="utf-8")
+        self.refused(run("ledger.py", "validate", str(self.run_dir)), "not among this unit's result fingerprints")
+        ledger_path.write_text(good, encoding="utf-8")
+        cands_path = self.run_dir / "candidates.json"
+        cands = json.loads(cands_path.read_text(encoding="utf-8"))
+        orphan = dict(cands["candidates"][0], fingerprint="app/files.py:nowhere:orphan")
+        cands["candidates"].append(orphan)
+        cands_path.write_text(json.dumps(cands), encoding="utf-8")
+        self.refused(run("ledger.py", "validate", str(self.run_dir)), "linked to no ledger unit")
+
     def test_merge_critic_quick_defers_instead(self) -> None:
         quick = self.tmpdir / "out" / "quick"
         self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(quick), "--profile", "quick"))
@@ -891,6 +965,12 @@ class FindingsTests(RunFixture):
         self.ok(run("ledger.py", "validate", str(self.run_dir)))
         self.ok(run("findings.py", "validate", str(self.run_dir)))
         self.assertEqual(self.ok(run("compile.py", str(self.run_dir)))["needs_validation"], 1)
+
+    def test_validate_pins_duplicate_fingerprints_in_a_findings_file(self) -> None:
+        self.hunt()
+        rec = self.candidate_record(0)
+        path = self.write_json([rec, rec], "dup.json")
+        self.refused(run("findings.py", "validate", str(path)), "duplicate of findings[0]")
 
     def test_redecide_after_a_verdict_changing_replacement(self) -> None:
         self.hunt()
@@ -1117,6 +1197,15 @@ class CompileTests(RunFixture):
         self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "esc.json"))), "control or format character U+001B")
         rec = self.candidate_record(0, fingerprint="app/files.py:read_user_file:path-traversal\n")
         self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "nl.json"))), "does not match pattern")
+
+    def test_plain_and_fenced_pin_table_and_fence_escapes(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        import compile as compile_module  # noqa: E402
+        self.assertEqual(compile_module.plain("a|b"), "a\\|b")
+        lines = compile_module.fenced("x\n````\ny")
+        self.assertEqual(lines[0], "````")
+        self.assertNotIn("````", lines[1:-2])
+        self.assertIn("` ` ` `", lines)
 
     def test_repo_name_is_accepted_by_shape(self) -> None:
         sys.path.insert(0, str(SCRIPTS))

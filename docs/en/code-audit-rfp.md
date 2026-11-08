@@ -191,8 +191,14 @@ and the parent never runs them.
   | `classes/cli.md` | Go / Python CLI | environment leaking to child processes (security.md); credentials quoted in URL or config syntax errors (security.md); silent fallback to defaults (ADR-026 / config-and-io.md); cleaning up from what was planned instead of what was created (security.md) |
   | `classes/agent-runtime.md` | LLM agent runtime | self-approval; guards keyed on a refusal flag; agent-writable persistent memory; permissions premised on "only a human writes this"; a constraint that can loosen is a permission (all security.md) |
 
-  The knowledge base is the origin; the skill carries a copy. The check is
-  written the day the copy is: `classes.py check-knowledge` runs only when
+  The generic classes (generic.md) restate, in our own words, the attack-class
+  lenses of the reference (cloudflare/security-audit-skill, commit c1c8a8c)
+  for the areas where the organization has little recorded knowledge, citing
+  `origin:<file>#<block>` as a third source kind (user decision 2026-11-08;
+  moving them into knowledge was rejected because knowledge records the
+  organization's own defects). Attribution is in LICENSE and README.
+  The knowledge base (and the reference) is the source; the skill carries a
+  copy. The check is written the day the copy is: `classes.py check-knowledge` runs only when
   `--knowledge <dir>` is given and is skipped otherwise (a standalone clone's
   `make check` does not depend on the knowledge base, the reason behind
   ADR-006). New lessons are followed at release time.
@@ -221,9 +227,18 @@ and the parent never runs them.
   the visible evidence kind, the confidence cap and the rule that a decisive
   runtime fact drops the record to `needs_validation` absorb it. `run.py exec`
   does not block the network; network-reaching commands are only forbidden by
-  the ledger, which is recorded as a residual risk too. The OS sandbox the
-  reference demands does not exist in the organization, and demanding it in
-  prose would not make it so. Execution inside a container (data-toolbox's
+  the ledger, which is recorded as a residual risk too. Nor does `run.py exec`
+  isolate the filesystem: the target's tests run as the user and can write
+  the run directory, HOME and this skill's own scripts, so a file the parent
+  later opens by name (a `checks/` log, a digested path) can be swapped for a
+  link (the scripts digest without following links, but the log write
+  remains). Whether a sub-agent really has no shell depends on the agent type
+  the runtime offers; SKILL.md can only ask for the most restricted one.
+  "The verifier never saw the hunter's prompt" and "no credential name in
+  `env_allow`" cannot be closed by a script (a name denylist does not close).
+  All recorded as residuals by the independent verification of 2026-11-08.
+  The OS sandbox the reference demands does not exist in the organization,
+  and demanding it in prose would not make it so. Execution inside a container (data-toolbox's
   Podman pattern) is a Phase 2 candidate decided by its own ADR.
 - **Sub-agents are read-only.** Hunters, critics and verifiers return JSON,
   write no files and run no commands. This removes the reference's
@@ -305,7 +320,7 @@ review cuts.
    preventing layers.
 3. **Standard waves and carry-over**: critic waves (`merge-critic`), the two
    verification stages with the replacement rule, `--prior` carry-over
-   (`carry`, source digests).
+   (`seed --prior`, source digests).
 4. `make check` (structural validation + script tests; `--knowledge` optional).
 
 Independently reviewable cuts: (1) is deterministic and judged by tests alone.
@@ -460,3 +475,16 @@ independent pass), it sits beside compliance-review and incident-review.
   record reaches the report), places compared by name (an output directory
   spelled differently is created inside the target). Adopted items are fixed
   in cut (4).
+- **2026-11-08 cut (4) (adopted verification findings)**: triage groups A–I
+  applied — places compared by identity, link-free bounded digests, foreign
+  git-dirs refused, prior runs validated / findings cross-checked with the
+  ledger, decided records only in reports / approval, budget, agent
+  uniqueness and log validity held by the scripts / inert output,
+  `fullmatch`, repo name by shape / state-machine holes / fourteen SKILL.md
+  points / class fidelity / pins for the eighteen unpinned controls. User
+  decision (same day): borrow the origin's know-how in our words for generic
+  areas where the organization has little recorded knowledge, with `origin:`
+  as a third source kind. Class files may be 16 KB (only the selected
+  classes are pasted, so file size does not drive cost). Deferred: ten new
+  classes, bundling a sub-agent definition. Next: a second independent
+  verification pass over the fixes.

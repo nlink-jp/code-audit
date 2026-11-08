@@ -77,8 +77,8 @@
   on the fourteen points the parent would have stopped at; the hunting
   classes rewritten to their sources, with `origin:` as a third source kind
   (user decision 2026-11-08: borrow the origin skill's generic lenses in our
-  own words where the organization has little recorded knowledge). 71
-  tests.
+  own words where the organization has little recorded knowledge); pins for
+  the eighteen controls the mutation review found unpinned. 77 tests.
 
 ### Planned for 0.1.0
 
