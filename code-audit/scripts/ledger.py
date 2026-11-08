@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import re
 import sys
 from pathlib import Path
@@ -427,7 +428,7 @@ def prior_status_from_unit(pu: dict, current_digests: dict) -> str:
         if "confirmed" in verdicts:
             return "prior_confirmed_same_source" if same else "prior_confirmed_changed_source"
         if "needs_validation" in verdicts:
-            return "prior_needs_validation"
+            return "prior_needs_validation" if same else "prior_needs_validation_changed_source"
         if "rejected" in verdicts:
             return "prior_covered_same_source" if same else "prior_rejected_claim_changed"
         return "prior_blocked"
@@ -493,7 +494,7 @@ def cmd_seed(args: argparse.Namespace) -> None:
                     cu["prior_status"] = prior_status_from_unit(pu, cu["source_digests"])
         # A record-derived status outranks a unit-derived one, and among
         # records the strongest prior claim wins for the unit.
-        rank = {"prior_confirmed_changed_source": 5, "prior_confirmed_same_source": 4, "prior_needs_validation": 3, "prior_rejected_claim_changed": 2}
+        rank = {"prior_confirmed_changed_source": 6, "prior_confirmed_same_source": 5, "prior_needs_validation_changed_source": 4, "prior_needs_validation": 3, "prior_rejected_claim_changed": 2}
         proposed: dict[str, str] = {}
 
         def propose(u: dict, status: str) -> None:
@@ -532,8 +533,10 @@ def cmd_seed(args: argparse.Namespace) -> None:
                     else:
                         candidates["changed_prior"].append({"fingerprint": fp, "title": rec.get("title", ""), "verdict": verdict, "prior_run": prior["run_id"], "units": [u["coverage_id"] for u in linked]})
                 elif verdict == "needs_validation":
+                    # E30 (E2E run 4): a lead whose source changed is listed
+                    # as changed_prior, and its unit says so too.
                     for u in linked:
-                        propose(u, "prior_needs_validation")
+                        propose(u, "prior_needs_validation" if same else "prior_needs_validation_changed_source")
                     if same:
                         candidates["carried"].append(carried)
                     else:
@@ -704,7 +707,7 @@ def record_errors(run_dir: Path | None, rec: dict, where: str) -> list[str]:
 def cmd_record(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     result = c.read_json(Path(args.result))
-    errors = c.validate_part(result, "hunter_result", "result") + c.forbidden_char_errors(result, "result")
+    errors = c.validate_part(result, "hunter_result", "result") + c.forbidden_char_errors(result, "result") + c.personal_identifier_errors(result, "result")
     c.fail_if(errors)
     agent = result["agent_id"]
     if not c.is_agent_id(agent):
@@ -853,7 +856,7 @@ def cmd_merge_critic(args: argparse.Namespace) -> None:
     if not target.is_dir():
         c.die(f"target is not a directory: {args.target}")
     critic = c.read_json(Path(args.result))
-    errors = c.validate_part(critic, "critic_result", "critic") + c.forbidden_char_errors(critic, "critic")
+    errors = c.validate_part(critic, "critic_result", "critic") + c.forbidden_char_errors(critic, "critic") + c.personal_identifier_errors(critic, "critic")
     c.fail_if(errors)
     quick = meta["profile"] == "quick"
     units = load_ledger(run_dir)
@@ -976,6 +979,17 @@ def cmd_merge_candidates(args: argparse.Namespace) -> None:
     })
 
 
+FILE_RULE = "every `file` in trace, evidence and remediation is a path inside TARGET; dependency and standard-library citations go in prose, with the version"
+# E31 (E2E run 4): six verifiers dropped `kind` and `scope` from trace entries
+# because the parent's prompt named only three fields; the brief lists the
+# required fields of the entries too, so the contract is read, not retyped.
+REQUIRED_FIELD_PARTS = ("finding_confirmed", "finding_needs_validation", "finding_rejected", "trace_entry", "evidence_entry")
+
+
+def required_fields() -> dict:
+    return {part: list(c.schema_part(part).get("required", [])) for part in REQUIRED_FIELD_PARTS}
+
+
 def unit_brief(u: dict) -> dict:
     """The facts of a unit a critic or verifier needs, copied from the ledger
     so the parent never paraphrases a coverage id or an invariant."""
@@ -996,6 +1010,37 @@ def unit_brief(u: dict) -> dict:
         "result_fingerprints": u["result_fingerprints"],
         "unresolved": u["unresolved"],
     }
+
+
+FILE_LIST_CAP = 400
+
+
+def list_files(target: Path, starting_paths: list[str]) -> dict:
+    """The regular files under a unit's starting paths, repository-relative
+    and sorted, capped so a whole-tree unit cannot flood the brief. Links are
+    listed by name and never followed; `.git` is skipped."""
+    found: list[str] = []
+    truncated = False
+    for sp in starting_paths:
+        root = target / sp
+        if root.is_symlink() or not root.exists():
+            continue
+        if root.is_file():
+            found.append(sp)
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = sorted(d for d in dirnames if d != ".git" and not (Path(dirpath) / d).is_symlink())
+            for fn in sorted(filenames):
+                rel = (Path(dirpath) / fn).relative_to(target).as_posix()
+                if len(found) >= FILE_LIST_CAP:
+                    truncated = True
+                    break
+                found.append(rel)
+            if truncated:
+                break
+        if truncated:
+            break
+    return {"files": sorted(set(found)), "truncated": truncated, "cap": FILE_LIST_CAP}
 
 
 def check_logs_brief(run_dir: Path) -> list[dict]:
@@ -1037,7 +1082,7 @@ def class_section(ref: str) -> str:
 
 
 ARCHITECTURE_FILE = "architecture.md"
-LOCAL_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])/(?:Users|home|root|private/tmp|tmp|var/folders)/[^\s\"'`)]+")
+LOCAL_PATH_RE = c.LOCAL_PATH_RE
 
 
 CLOSING_TAG_RE = re.compile(r"<(\s*)/(\s*)target-data", re.IGNORECASE)
@@ -1113,7 +1158,7 @@ def cmd_architecture(args: argparse.Namespace) -> None:
             errors.append(f"{p.name}: agent_id must be '{p.stem}', the file's name")
         if not isinstance(data.get("summary"), str) or not data["summary"].strip():
             errors.append(f"{p.name}: a reconnaissance return carries a non-empty summary string")
-        errors += c.forbidden_char_errors(data, p.name)
+        errors += c.forbidden_char_errors(data, p.name) + c.personal_identifier_errors(data, p.name)
         sections.append((p.stem, data))
     lines = [
         f"# {c.inert(str(meta.get('repo', '')))} — architecture (reconnaissance synthesis)",
@@ -1162,12 +1207,20 @@ def cmd_brief(args: argparse.Namespace) -> None:
             for ref in u["selected_classes"]:
                 if ref not in refs:
                     refs.append(ref)
-        c.emit({
+        out = {
             "agent_id": args.agent,
             "units": [unit_brief(u) for u in mine],
             "classes": {ref: class_section(ref) for ref in refs},
             "check_logs": check_logs_brief(run_dir),
-        })
+        }
+        if args.target:
+            # E34 (E2E runs 2 and 4): hunters that could not list the tree
+            # read files by guessed name; the brief carries the listing.
+            target = Path(args.target)
+            if not target.is_dir():
+                c.die(f"target is not a directory: {args.target}")
+            out["files"] = {u["coverage_id"]: list_files(target, u["starting_paths"]) for u in mine}
+        c.emit(out)
         return
     if args.role == "reverifier":
         if not args.fingerprint:
@@ -1180,6 +1233,8 @@ def cmd_brief(args: argparse.Namespace) -> None:
             "record": rec,
             "units": [unit_brief(ids[cid]) for cid in rec.get("coverage_ids", []) if cid in ids],
             "check_logs": check_logs_brief(run_dir),
+            "required_fields": required_fields(),
+            "file_rule": FILE_RULE,
         })
         return
     if args.role == "critic":
@@ -1213,8 +1268,8 @@ def cmd_brief(args: argparse.Namespace) -> None:
         "check_logs": check_logs_brief(run_dir),
         # E24: the required fields of each verdict's record, from the schema,
         # so the contract the parent pastes never drifts from the validator.
-        "required_fields": {part: list(c.schema_part(part).get("required", [])) for part in ("finding_confirmed", "finding_needs_validation", "finding_rejected")},
-        "file_rule": "every `file` in trace, evidence and remediation is a path inside TARGET; dependency and standard-library citations go in prose, with the version",
+        "required_fields": required_fields(),
+        "file_rule": FILE_RULE,
     })
 
 
@@ -1364,6 +1419,11 @@ def estimate_numbers(meta: dict, units: list, candidates: dict) -> dict:
     # unit, at least one.
     expected_candidates = pending + (max(1, math.ceil(hunting * rate)) if hunting else 0)
     verifiers = expected_candidates * stages
+    # E33 (E2E run 4): in standard the second stage also re-verifies every
+    # record already decided; subtract the re-verifiers already launched.
+    if not quick:
+        decided = len(candidates["decided"])
+        verifiers += max(0, decided - int(meta["invocations"].get("reverifier", 0)))
     reruns = math.ceil((hunters + critics + verifiers) * RERUN_RATE)
     spent = sum(meta["invocations"].values())
     return {
@@ -1509,6 +1569,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("role", choices=["hunter", "critic", "verifier", "reverifier"])
     p.add_argument("--agent", help="the hunter whose assigned units the brief holds")
     p.add_argument("--fingerprint", help="the pending candidate (verifier) or decided record (reverifier) the brief is about")
+    p.add_argument("--target", help="the target checkout; with the hunter role the brief lists the files under each unit's starting paths (E34)")
     p.set_defaults(func=cmd_brief)
 
     p = sub.add_parser("decide")

@@ -375,10 +375,13 @@ def cmd_set_budget(args: argparse.Namespace) -> None:
 
 
 def cmd_nonce(args: argparse.Namespace) -> None:
-    """A fresh token for the <target-data nonce="..."> tags the parent wraps
-    target-derived text in before a model reads it."""
+    """A fresh token for the <target-data-N> … </target-data-N> tags the
+    parent wraps target-derived text in before a model reads it."""
     import secrets
-    c.emit({"nonce": secrets.token_hex(8)})
+    nonce = secrets.token_hex(8)
+    # E29 (E2E runs 3-4): the nonce sits on both tags, so target-derived text
+    # can forge neither the opening nor the closing one.
+    c.emit({"nonce": nonce, "open": f"<target-data-{nonce}>", "close": f"</target-data-{nonce}>"})
 
 
 def cmd_approve(args: argparse.Namespace) -> None:

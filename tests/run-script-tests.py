@@ -1129,6 +1129,72 @@ class LedgerTests(RunFixture):
         shutil.copy(self.tmpdir / "recon-d.json", self.run_dir / "agents" / "recon-d.json")
         self.refused(run("ledger.py", "architecture", str(self.run_dir)), "agent_id must be 'recon-d'")
 
+    def test_briefs_list_entry_fields_and_the_hunter_brief_lists_files(self) -> None:
+        # E31 (E2E run 4): six verifiers dropped trace `kind` / `scope`; the
+        # verifier's and re-verifier's briefs name the entry fields from the schema.
+        self.hunt()
+        fp = "app/files.py:read_user_file:path-traversal"
+        vb = self.ok(run("ledger.py", "brief", str(self.run_dir), "verifier", "--fingerprint", fp))
+        self.assertEqual(vb["required_fields"]["trace_entry"], ["kind", "file", "line", "scope", "description"])
+        self.assertEqual(vb["required_fields"]["evidence_entry"], ["file", "line", "description"])
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(0), "r0.json"))))
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", "confirmed"))
+        rb = self.ok(run("ledger.py", "brief", str(self.run_dir), "reverifier", "--fingerprint", fp))
+        self.assertEqual(rb["required_fields"]["trace_entry"], ["kind", "file", "line", "scope", "description"])
+        self.assertIn("inside TARGET", rb["file_rule"])
+
+    def test_hunter_brief_lists_the_files_under_the_starting_paths(self) -> None:
+        # E34 (E2E runs 2 and 4): hunters without a listing tool guessed file
+        # names; with --target the hunter's brief lists the files under the
+        # unit's starting paths, links unfollowed and .git skipped.
+        self.seed()
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1, u2))
+        hb = self.ok(run("ledger.py", "brief", str(self.run_dir), "hunter", "--agent", "hunter-1"))
+        self.assertNotIn("files", hb)
+        (self.target / "app" / "link.py").symlink_to(self.target / "tests" / "test_files.py")
+        (self.target / ".git").mkdir(exist_ok=True)
+        (self.target / ".git" / "config").write_text("x", encoding="utf-8")
+        hb = self.ok(run("ledger.py", "brief", str(self.run_dir), "hunter", "--agent", "hunter-1", "--target", str(self.target)))
+        self.assertEqual(set(hb["files"]), {u1, u2})
+        for listing in hb["files"].values():
+            self.assertFalse(listing["truncated"])
+            self.assertEqual(listing["cap"], 400)
+            self.assertTrue(all(not f.startswith((".git", "/")) for f in listing["files"]), listing)
+            self.assertTrue(any(f.endswith("files.py") for f in listing["files"]), listing)
+        starting = next(u for u in self.ledger() if u["coverage_id"] == u1)["starting_paths"]
+        if any(sp.startswith("app") and not sp.endswith(".py") for sp in starting):
+            self.assertIn("app/link.py", hb["files"][u1]["files"])  # listed by name, never followed
+        self.refused(run("ledger.py", "brief", str(self.run_dir), "hunter", "--agent", "hunter-1", "--target", str(self.target / "nope")), "not a directory")
+
+    def test_returns_that_spell_the_login_or_a_local_path_are_refused(self) -> None:
+        # E32 (E2E run 4): two hunters spelled the builder's login and an
+        # absolute audit path. The scripts refuse both wherever a return enters
+        # the books; the agent is re-asked to describe, not spell.
+        import getpass
+        self.seed()
+        self.ok(run("run.py", "exec", str(self.run_dir), "unit-tests", "--target", str(self.target)))
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1, u2))
+        res = self.hunter_result()
+        res["notes"].append({"kind": "hardening", "text": "the owner example at /Users/someone/works/app/files.py:3"})
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(res, "h1.json"))), "absolute local path")
+        login = getpass.getuser()
+        res = self.hunter_result()
+        res["notes"].append({"kind": "hardening", "text": f"CHANGELOG.md:12 spells the login {login} as the owner"})
+        proc = run("ledger.py", "record", str(self.run_dir), str(self.write_json(res, "h2.json")))
+        if len(login) >= 3:
+            self.refused(proc, "spells the operator's login")
+            self.assertNotIn(login, proc.stderr.split("spells the operator's login")[0].rsplit(":", 1)[-1])
+        res = self.hunter_result()
+        res["notes"].append({"kind": "hardening", "text": f"a word containing it, {login}x, is not the login"})
+        self.ok(run("ledger.py", "record", str(self.run_dir), str(self.write_json(res, "h3.json"))))
+        rec = self.candidate_record(0, description="see /home/builder/src/app/files.py")
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "r.json"))), "absolute local path")
+        self.refused(run("findings.py", "note", str(self.run_dir), "--agent", "verifier-1", "--kind", "lead", "--text", "left at /private/tmp/x/y"), "absolute local path")
+        critic = {"agent_id": "critic-1", "missing_units": [], "reassign_ids": [{"coverage_id": u1, "reason": "guessed from /Users/x/y"}], "resolved_prior_leads": [], "stop": False}
+        self.refused(run("ledger.py", "merge-critic", str(self.run_dir), str(self.write_json(critic, "c.json")), "--target", str(self.target)), "absolute local path")
+
     def test_invalid_json_is_refused_with_its_position_and_context(self) -> None:
         # E23 (E2E run 3): three returns had unbalanced braces; the re-ask quotes the spot
         self.hunt()
@@ -1152,6 +1218,15 @@ class LedgerTests(RunFixture):
         est = self.ok(run("ledger.py", "estimate", str(self.run_dir)))
         self.assertEqual(est["critics"], 2)
         self.assertEqual(est["total_invocations"], est["spent"] + est["critics"] + est["verifiers"] + est["reruns"])
+        # E33 (E2E run 4): once a record is decided, standard still owes it a
+        # re-verifier; a launched re-verifier pays that debt
+        before = est["verifiers"]
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(0), "r0.json"))))
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", "app/files.py:read_user_file:path-traversal", "--verdict", "confirmed"))
+        est = self.ok(run("ledger.py", "estimate", str(self.run_dir)))
+        self.assertEqual(est["verifiers"], before - 2 + 1)  # one pending fewer (two stages), one decided to re-verify
+        self.ok(run("run.py", "count", str(self.run_dir), "reverifier", "--agent", "reverifier-1"))
+        self.assertEqual(self.ok(run("ledger.py", "estimate", str(self.run_dir)))["verifiers"], before - 2)
 
 
 class FindingsTests(RunFixture):
@@ -1199,7 +1274,17 @@ class FindingsTests(RunFixture):
         out = self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "b.json")), "--replace", "--by", "reverifier-1"))
         self.assertEqual((out["replaced"], out["records"], out["strengthened"], out["verdict_changed"]), ("confirmed", 1, [], False))
         log = json.loads((self.run_dir / "replacements.json").read_text(encoding="utf-8"))
-        self.assertEqual(log, [{"fingerprint": rec["fingerprint"], "previous_verdict": "confirmed", "verdict": "confirmed", "strengthened": [], "by": "reverifier-1", "confirmed_by": None}])
+        self.assertEqual(log, [{"fingerprint": rec["fingerprint"], "previous_verdict": "confirmed", "verdict": "confirmed", "strengthened": [], "weakened": ["severity.overall"], "by": "reverifier-1", "confirmed_by": None}])
+        # E35 (E2E run 4): the report calls it a weakening, not a wording fix
+        self.ok(run("compile.py", str(self.run_dir)))
+        report = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
+        self.assertIn("1 (1 weakening the verdict, severity, confidence or evidence kind)", report)
+        rec["title"] = rec["title"] + " (reworded)"
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(rec, "c.json")), "--replace", "--by", "reverifier-2"))
+        self.ok(run("compile.py", str(self.run_dir)))
+        report = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
+        self.assertIn("2 (1 weakening the verdict, severity, confidence or evidence kind; 1 wording or line corrections)", report)
+        self.assertIn("2 件（弱化 1 件（判定・深刻度・confidence・根拠種別のいずれか）、文言・行番号の修正 1 件）", (self.run_dir / "REPORT.ja.md").read_text(encoding="utf-8"))
 
     def test_strengthening_replacement_needs_a_second_fresh_verifier(self) -> None:
         self.hunt()
@@ -1319,7 +1404,7 @@ class FindingsTests(RunFixture):
         self.ok(run("ledger.py", "validate", str(self.run_dir)))
         self.ok(run("compile.py", str(self.run_dir)))
         en = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
-        self.assertIn("| records replaced after re-verification | 1 (wording or line corrections only, none strengthening)", en)
+        self.assertIn("| records replaced after re-verification | 1 (1 weakening the verdict, severity, confidence or evidence kind)", en)
 
 
 class PriorRunTests(RunFixture):
@@ -1366,6 +1451,24 @@ class PriorRunTests(RunFixture):
         self.assertEqual(units["Injection"]["prior_status"], "prior_covered_changed_source")
         cands = json.loads((run2 / "candidates.json").read_text(encoding="utf-8"))
         self.assertEqual(cands["carried"], [])
+        self.assertEqual(sorted(r["fingerprint"] for r in cands["changed_prior"]), ["app/files.py:read_user_file:path-traversal", "app/files.py:read_user_file:symlink-escape"])
+
+    def test_changed_source_prior_lead_marks_its_unit(self) -> None:
+        # E30 (E2E run 4): the unit of a needs_validation lead whose source
+        # changed said `prior_needs_validation` while the record sat in
+        # changed_prior; the unit now says so.
+        self.hunt()
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(1), "nv.json"))))
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", "app/files.py:read_user_file:symlink-escape", "--verdict", "needs_validation"))
+        path = self.target / "app" / "files.py"
+        path.write_text(path.read_text(encoding="utf-8") + "\n# touched\n", encoding="utf-8")
+        run2 = self.tmpdir / "out" / "run-2"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
+        out = self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.assertEqual(out["carried"], [])
+        units = {u["attack_class"]: u for u in json.loads((run2 / "coverage-ledger.json").read_text(encoding="utf-8"))}
+        self.assertEqual(units["Resource and file handling"]["prior_status"], "prior_needs_validation_changed_source")
+        self.ok(run("ledger.py", "validate", str(run2)))
 
     def test_prior_records_are_matched_by_place_across_profiles(self) -> None:
         # E13 (E2E 2026-11-08): a standard prior under quick (and the reverse)

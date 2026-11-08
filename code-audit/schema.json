@@ -154,7 +154,7 @@
         "priority": { "type": "integer", "minimum": 1 },
         "prior_status": {
           "type": "string",
-          "enum": ["none", "new", "prior_confirmed_same_source", "prior_confirmed_changed_source", "prior_needs_validation", "prior_deferred", "prior_blocked", "prior_out_of_scope", "prior_covered_same_source", "prior_covered_changed_source", "prior_rejected_claim_changed"]
+          "enum": ["none", "new", "prior_confirmed_same_source", "prior_confirmed_changed_source", "prior_needs_validation", "prior_needs_validation_changed_source", "prior_deferred", "prior_blocked", "prior_out_of_scope", "prior_covered_same_source", "prior_covered_changed_source", "prior_rejected_claim_changed"]
         },
         "source_digests": { "type": "object" },
         "attempts": {

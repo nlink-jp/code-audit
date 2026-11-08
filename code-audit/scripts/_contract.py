@@ -10,6 +10,7 @@ script applies exactly one definition of each.
 from __future__ import annotations
 
 import hashlib
+import getpass
 import json
 import os
 import re
@@ -233,6 +234,42 @@ def forbidden_char_errors(value: object, path: str) -> list[str]:
     elif isinstance(value, list):
         for i, v in enumerate(value):
             errors += forbidden_char_errors(v, f"{path}[{i}]")
+    return errors
+
+
+# E32 (E2E run 4): two hunters spelled the builder's login and an absolute
+# audit path in their returns. The artifacts are meant for a shared records
+# repository, so a return that spells the operator's login or an absolute
+# local path is refused and the agent re-asked to describe, not spell.
+LOCAL_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])/(?:Users|home|root|private/tmp|tmp|var/folders)/[^\s\"'`)]+")
+
+
+def operator_login() -> str:
+    try:
+        return getpass.getuser()
+    except Exception:  # no passwd entry, no env: nothing to refuse
+        return ""
+
+
+def personal_identifier_errors(value: object, path: str, login: str | None = None) -> list[str]:
+    """Absolute local paths and the operator's login, as whole words, anywhere
+    in a return or record. A login shorter than three characters is not
+    checked (it would match ordinary words)."""
+    login = operator_login() if login is None else login
+    login_re = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(login)}(?![A-Za-z0-9_])") if len(login) >= 3 else None
+    errors: list[str] = []
+    if isinstance(value, str):
+        hit = LOCAL_PATH_RE.search(value)
+        if hit:
+            errors.append(f"{path}: an absolute local path ({hit.group(0)}); describe the place or cite a repository-relative path")
+        if login_re and login_re.search(value):
+            errors.append(f"{path}: spells the operator's login; describe it (\"the builder's login at file:line\"), never spell it")
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            errors += personal_identifier_errors(v, f"{path}.{k}", login)
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            errors += personal_identifier_errors(v, f"{path}[{i}]", login)
     return errors
 
 

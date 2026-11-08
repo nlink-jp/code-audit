@@ -104,6 +104,13 @@ def strengthened_fields(old: dict, new: dict) -> list[str]:
     return out
 
 
+def weakened_fields(old: dict, new: dict) -> list[str]:
+    """The fields along which `new` claims less than `old` did (E35: the
+    report says so instead of calling every unstrengthened replacement a
+    wording fix)."""
+    return strengthened_fields(new, old)
+
+
 def cmd_add(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     c.load_metadata(run_dir)
@@ -113,7 +120,7 @@ def cmd_add(args: argparse.Namespace) -> None:
     if not isinstance(rec, dict):
         c.die("record must be an object")
     target = Path(args.target) if args.target else None
-    errors = ledger.record_errors(run_dir, rec, "record")
+    errors = ledger.record_errors(run_dir, rec, "record") + c.personal_identifier_errors(rec, "record")
     c.fail_if(errors)
     findings = c.load_findings(run_dir)
     existing = [i for i, r in enumerate(findings) if r.get("fingerprint") == rec["fingerprint"]]
@@ -159,6 +166,7 @@ def cmd_add(args: argparse.Namespace) -> None:
             "previous_verdict": old["verdict"],
             "verdict": rec["verdict"],
             "strengthened": strengthened,
+            "weakened": weakened_fields(old, rec),
             "by": args.by,
             "confirmed_by": args.confirmed_by,
         }
@@ -177,6 +185,7 @@ def cmd_add(args: argparse.Namespace) -> None:
         "verdict": rec["verdict"],
         "replaced": replaced,
         "strengthened": entry["strengthened"] if entry else [],
+        "weakened": entry["weakened"] if entry else [],
         "verdict_changed": bool(entry) and entry["previous_verdict"] != rec["verdict"],
         "records": len(findings),
     })
@@ -223,7 +232,7 @@ def cmd_note(args: argparse.Namespace) -> None:
     note = {"agent_id": args.agent, "kind": args.kind, "text": args.text}
     if args.coverage_id:
         note["coverage_id"] = args.coverage_id
-    errors = c.validate_part(note, "note", "note") + c.forbidden_char_errors(note, "note")
+    errors = c.validate_part(note, "note", "note") + c.forbidden_char_errors(note, "note") + c.personal_identifier_errors(note, "note")
     if not c.is_agent_id(args.agent):
         errors.append("note.agent_id: not a canonical agent id")
     c.fail_if(errors)
