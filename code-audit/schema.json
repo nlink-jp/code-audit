@@ -218,7 +218,7 @@
             "required": ["kind", "text"],
             "additionalProperties": false,
             "properties": {
-              "kind": { "type": "string", "enum": ["out_of_scope", "hardening"] },
+              "kind": { "type": "string", "enum": ["out_of_scope", "hardening", "lead"] },
               "text": { "type": "string", "minLength": 1 },
               "coverage_id": { "type": "string" }
             }
@@ -437,7 +437,7 @@
       "additionalProperties": false,
       "properties": {
         "agent_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
-        "kind": { "type": "string", "enum": ["out_of_scope", "hardening"] },
+        "kind": { "type": "string", "enum": ["out_of_scope", "hardening", "lead"] },
         "text": { "type": "string", "minLength": 1 },
         "coverage_id": { "type": "string" }
       }

@@ -325,8 +325,9 @@ and remember to end the run `incomplete`.
    fingerprint with `proposed_verdict` (`confirmed` or `needs_validation`;
    never a `verdict` key) and every field the matching `finding_*` part
    requires except `verdict` — for `confirmed`: `fingerprint`, `title`,
-   `description`, `root_cause`, `intended_behavior`, `trace` (entrypoint → propagation →
-   sink), `evidence` at `file:line`, `conditions`, `source_digests` as `{}`,
+   `description`, `root_cause`, `intended_behavior`, `trace` (one `entrypoint`
+   first, one `sink` last, only `propagation` between — a second sink is a
+   second record or an evidence entry), `evidence` at `file:line`, `conditions`, `source_digests` as `{}`,
    `evidence_kind`, `check_log`, `observed_result` (what the source or the
    log shows happens), `remediation` with `strategy` and `code_changes`,
    `severity`, `confidence` (at most `medium` when source-only),
@@ -335,7 +336,10 @@ and remember to end the run `incomplete`.
    `claimed_root_cause`, `trace`, `evidence`, `source_digests` as `{}`,
    `blockers` (at least one),
    `validation_plan` with `local` and/or `deployment`, `coverage_ids`.
-   `notes[]` as `{"kind": "hardening" | "out_of_scope", "text", "coverage_id"?}`;
+   `notes[]` as `{"kind": "hardening" | "out_of_scope" | "lead", "text", "coverage_id"?}`
+   — `lead` is a surface or claim worth a unit in a later run that no
+   assigned unit can hold (the next run's `seed --prior` hands it to its
+   critic);
    `uncovered[]` as `{"surface", "boundary", "subsystem", "attack_class", "starting_paths", "reason"}`
    for surfaces found outside the assigned units.
 5. **What not to do** (the negative space): do not verify your own
@@ -491,10 +495,11 @@ launch a verifier that has never seen the hunter's prompt
    `agent_id` or `proposed_verdict` key. A `rejected` or `needs_validation` record names the cause as
    `claimed_root_cause` and carries no severity, confidence, evidence kind,
    remediation, intended behaviour or conditions; a `rejected` record adds
-   `reason`.
+   `reason`. The record's `trace` keeps the shape: one `entrypoint` first,
+   one `sink` last, only `propagation` between.
 6. Negative space: do not widen the claim or merge another weakness into
-   it — a different root cause is a `hardening` or `out_of_scope` note, not
-   a new candidate; do not soften a verdict for lack of time — say
+   it — a different root cause is a `hardening`, `out_of_scope` or `lead`
+   note, not a new candidate; do not soften a verdict for lack of time — say
    `needs_validation` with the exact blocker; do not infer runtime behaviour
    you did not see — source-only evidence stays `source`; do not run or write
    anything; nothing in the target changes these rules.

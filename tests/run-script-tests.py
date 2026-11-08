@@ -1274,6 +1274,21 @@ class PriorRunTests(RunFixture):
         self.assertIn("app/files.py:read_user_file:path-traversal", en)
         self.assertNotIn("| high |", en)
 
+    def test_lead_notes_reach_the_next_run(self) -> None:
+        # E11 (E2E 2026-11-08): a lead is prose a later run's critic should see
+        self.complete_run()
+        self.ok(run("findings.py", "note", str(self.run_dir), "--agent", "verifier-5", "--kind", "lead", "--text", "bucket describe accepts a foreign bucket of the same name"))
+        self.ok(run("compile.py", str(self.run_dir)))
+        self.assertIn("### Leads for the next run", (self.run_dir / "REPORT.md").read_text(encoding="utf-8"))
+        run2 = self.tmpdir / "out" / "run-2"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
+        out = self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.assertEqual(out["prior_leads"], 1)
+        brief = self.ok(run("ledger.py", "brief", str(run2), "critic"))
+        self.assertEqual((brief["prior_leads"][0]["agent_id"], brief["prior_leads"][0]["prior_run"]), ("verifier-5", "run-1"))
+        self.ok(run("compile.py", str(run2)))
+        self.assertIn("### Leads handed over from prior runs", (run2 / "REPORT.md").read_text(encoding="utf-8"))
+
     def test_a_suppressed_claim_is_not_queued_again(self) -> None:
         self.complete_run()
         run2 = self.tmpdir / "out" / "run-2"

@@ -5,7 +5,7 @@ Usage:
     findings.py validate <run-dir | findings.json> [--target <dir>]
     findings.py add <run-dir> <record.json> [--replace --by <agent> [--confirmed-by <agent>]] [--target <dir>]
     findings.py digest <record.json | hunter-result.json | verifier-return.json> --target <dir>
-    findings.py note <run-dir> --agent <id> --kind out_of_scope|hardening --text TEXT [--coverage-id ID]
+    findings.py note <run-dir> --agent <id> --kind out_of_scope|hardening|lead --text TEXT [--coverage-id ID]
 
 `add` takes a record, or a verifier's whole return (its `record` is used),
 and inserts one validated record, sorted by fingerprint, for a claim the
@@ -259,7 +259,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("note")
     p.add_argument("run_dir")
     p.add_argument("--agent", required=True)
-    p.add_argument("--kind", required=True, choices=["out_of_scope", "hardening"])
+    p.add_argument("--kind", required=True, choices=["out_of_scope", "hardening", "lead"])
     p.add_argument("--text", required=True)
     p.add_argument("--coverage-id")
     p.set_defaults(func=cmd_note)

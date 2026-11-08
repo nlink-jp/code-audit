@@ -391,7 +391,18 @@ def load_prior(path: Path) -> dict:
                 warnings.append(f"prior {path.name}: record {i} dropped (does not validate)")
                 continue
             findings.append(rec)
-    return {"run_id": meta["run_id"], "name": path.resolve().name, "ledger": ledger, "findings": findings, "profile": meta["profile"], "created": meta.get("created", ""), "warnings": warnings}
+    leads = []
+    notes_path = path / c.NOTES_FILE
+    if notes_path.exists():
+        raw = c.read_json(notes_path)
+        for i, note in enumerate(raw if isinstance(raw, list) else []):
+            if not isinstance(note, dict) or note.get("kind") != "lead":
+                continue
+            if c.validate_part(note, "note", f"prior.notes[{i}]") or c.forbidden_char_errors(note, f"prior.notes[{i}]"):
+                warnings.append(f"prior {path.name}: lead note {i} dropped (does not validate)")
+                continue
+            leads.append(note)
+    return {"run_id": meta["run_id"], "name": path.resolve().name, "ledger": ledger, "findings": findings, "leads": leads, "profile": meta["profile"], "created": meta.get("created", ""), "warnings": warnings}
 
 
 def prior_status_from_unit(pu: dict, current_digests: dict) -> str:
@@ -506,6 +517,12 @@ def cmd_seed(args: argparse.Namespace) -> None:
                             propose(u, "prior_rejected_claim_changed")
         for cid, status in proposed.items():
             ids[cid]["prior_status"] = status
+        # A lead is a surface or claim a prior run's agent saw and no unit
+        # held; it reaches this run's critic through the brief, not the
+        # hunting queue, because it is prose and not a record.
+        for prior in priors:
+            for note in prior["leads"]:
+                candidates["prior_leads"].append({**note, "prior_run": prior["run_id"]})
         # The latest prior's verdict wins: a claim carried for re-verification
         # is not also suppressed.
         carried_fps = {r["fingerprint"] for r in candidates["carried"]}
@@ -518,6 +535,7 @@ def cmd_seed(args: argparse.Namespace) -> None:
         "carried": [r["fingerprint"] for r in candidates["carried"]],
         "suppressed": [r["fingerprint"] for r in candidates["suppressed"]],
         "unlinked_prior": [r["fingerprint"] for r in candidates["unlinked_prior"]],
+        "prior_leads": len(candidates["prior_leads"]),
         "warnings": warnings,
     })
 

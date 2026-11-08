@@ -36,7 +36,7 @@ L = {
         "partial_incomplete": "run_status は incomplete です。理由: {reason}",
         "posture": "要約",
         "posture_line": "confirmed {confirmed} 件（critical {critical} / high {high} / medium {medium} / low {low} / informational {informational}）、needs_validation {nv} 件、rejected {rejected} 件。",
-        "coverage_line": "網羅単位 {units} 件: covered {covered} / candidate {candidate} / blocked {blocked} / deferred {deferred} / out_of_scope {out_of_scope} / planned {planned}。",
+        "coverage_line": "網羅単位 {units} 件: covered {covered} / candidate {candidate}（うち判定済 {candidate_decided}）/ blocked {blocked} / deferred {deferred} / out_of_scope {out_of_scope} / planned {planned}。",
         "confirmed": "確定した所見", "confirmed_none": "確定した所見はありません。",
         "th_sev": "深刻度", "th_title": "題名", "th_boundary": "境界", "th_kind": "根拠種別", "th_observed": "観測された結果",
         "kind_source": "source（読解のみ）", "kind_test": "existing_test（{log}）",
@@ -48,7 +48,7 @@ L = {
         "nv_intro": "深刻度は付けません。各項目は未解決の事実と、それを解く安全な手順です。詳細は NEEDS-VALIDATION.ja.md。",
         "th_blockers": "未解決の事実", "th_local": "手元での確認", "th_deploy": "配備側で観測する確認", "claimed": "主張された根本原因", "blockers": "未解決の事実", "plan": "確認の手順",
         "local": "手元", "deployment": "配備側",
-        "notes": "覚え書き", "hardening": "強化の提案（所見ではない）", "out_of_scope": "範囲外の観察",
+        "notes": "覚え書き", "hardening": "強化の提案（所見ではない）", "out_of_scope": "範囲外の観察", "lead": "次の実行への手がかり（判定なし。次回の `seed --prior` が批評者に渡す）", "prior_leads": "前回の実行から渡された手がかり（この実行の批評者が見た）",
         "coverage": "網羅の要約", "th_status": "状態", "th_count": "件数", "deferred_units": "先送り・範囲外の単位と理由", "uncovered": "次の波に回すべき未割当の面", "unverified": "検証に至らなかった候補（判定なし・深刻度なし）", "undecided": "台帳の判定が無いレコード（所見として報告しない）", "unlinked_prior": "今回の単位に結び付かない前回のレコード（判定なし）", "changed_prior": "引用元が変わったため持ち越さず再度狩った前回のレコード（今回の判定は上の表）",
         "rejected": "反証された候補", "rejected_line": "反証された候補は所見ではありません。次回の再報告を抑えるために fingerprint だけを記します: {fps}",
         "merged": "同根として統合した候補", "merged_line": "次の候補は別の fingerprint と根本原因を共有すると判断し、統合先で 1 回だけ検証しました（統合先の判定が上の表にあります）。",
@@ -66,7 +66,7 @@ L = {
         "partial_incomplete": "run_status is incomplete. Reason: {reason}",
         "posture": "Summary",
         "posture_line": "{confirmed} confirmed (critical {critical} / high {high} / medium {medium} / low {low} / informational {informational}), {nv} needs_validation, {rejected} rejected.",
-        "coverage_line": "{units} coverage units: covered {covered} / candidate {candidate} / blocked {blocked} / deferred {deferred} / out_of_scope {out_of_scope} / planned {planned}.",
+        "coverage_line": "{units} coverage units: covered {covered} / candidate {candidate} ({candidate_decided} decided) / blocked {blocked} / deferred {deferred} / out_of_scope {out_of_scope} / planned {planned}.",
         "confirmed": "Confirmed findings", "confirmed_none": "No confirmed findings.",
         "th_sev": "Severity", "th_title": "Title", "th_boundary": "Boundary", "th_kind": "Evidence kind", "th_observed": "Observed result",
         "kind_source": "source (reading only)", "kind_test": "existing_test ({log})",
@@ -78,7 +78,7 @@ L = {
         "nv_intro": "No severity is assigned. Each lead names the unresolved fact and a safe step to settle it. Details in NEEDS-VALIDATION.md.",
         "th_blockers": "Unresolved facts", "th_local": "Local check", "th_deploy": "Owner-observed check", "claimed": "Claimed root cause", "blockers": "Unresolved facts", "plan": "Validation plan",
         "local": "local", "deployment": "deployment",
-        "notes": "Notes", "hardening": "Hardening notes (not findings)", "out_of_scope": "Out-of-scope observations",
+        "notes": "Notes", "hardening": "Hardening notes (not findings)", "out_of_scope": "Out-of-scope observations", "lead": "Leads for the next run (no verdict; the next run's `seed --prior` hands them to its critic)", "prior_leads": "Leads handed over from prior runs (seen by this run's critic)",
         "coverage": "Coverage summary", "th_status": "Status", "th_count": "Count", "deferred_units": "Deferred and out-of-scope units with reasons", "uncovered": "Unassigned surfaces for a later wave", "unverified": "Candidates not verified (no verdict, no severity)", "undecided": "Records without a ledger decision (not reported as findings)", "unlinked_prior": "Prior records that no current unit covers (no verdict)", "changed_prior": "Prior records whose cited sources changed (re-hunted, not carried; this run's verdicts are above)",
         "rejected": "Rejected candidates", "rejected_line": "Rejected candidates are not findings. Only their fingerprints are listed so the next run does not repeat the claim: {fps}",
         "merged": "Candidates merged as duplicates", "merged_line": "These candidates were judged to share a root cause with another fingerprint and were verified once under it (the kept fingerprint's verdict is in the tables above).",
@@ -179,7 +179,8 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
     out.append("")
     sev_counts = {s: sum(1 for r in confirmed if r["severity"]["overall"] == s) for s in c.IMPACT_ORDER}
     out.append(t["posture_line"].format(confirmed=len(confirmed), nv=len(nv), rejected=len(rejected), **sev_counts))
-    out.append(t["coverage_line"].format(units=len(units), **{s: counts.get(s, 0) for s in ("covered", "candidate", "blocked", "deferred", "out_of_scope", "planned")}))
+    candidate_decided = sum(1 for u in units if u["status"] == "candidate" and u["result_fingerprints"] and all(fp in decided for fp in u["result_fingerprints"]))
+    out.append(t["coverage_line"].format(units=len(units), candidate_decided=candidate_decided, **{s: counts.get(s, 0) for s in ("covered", "candidate", "blocked", "deferred", "out_of_scope", "planned")}))
     out.append("")
 
     out.append(f"## {t['confirmed']}")
@@ -246,9 +247,23 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
 
     hard = [n for n in notes if n.get("kind") == "hardening"]
     oos = [n for n in notes if n.get("kind") == "out_of_scope"]
-    if hard or oos:
+    leads = [n for n in notes if n.get("kind") == "lead"]
+    prior_leads = candidates.get("prior_leads", [])
+    if hard or oos or leads or prior_leads:
         out.append(f"## {t['notes']}")
         out.append("")
+        if leads:
+            out.append(f"### {t['lead']}")
+            out.append("")
+            for n in leads:
+                out.append(f"- {plain(n['text'])}")
+            out.append("")
+        if prior_leads:
+            out.append(f"### {t['prior_leads']}")
+            out.append("")
+            for n in prior_leads:
+                out.append(f"- ({plain(str(n.get('prior_run', '')))}) {plain(n['text'])}")
+            out.append("")
         if hard:
             out.append(f"### {t['hardening']}")
             out.append("")
