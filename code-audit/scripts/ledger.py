@@ -1040,12 +1040,21 @@ ARCHITECTURE_FILE = "architecture.md"
 LOCAL_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])/(?:Users|home|root|private/tmp|tmp|var/folders)/[^\s\"'`)]+")
 
 
+CLOSING_TAG_RE = re.compile(r"<(\s*)/(\s*)target-data", re.IGNORECASE)
+
+
+def break_closing_tag(text: str) -> str:
+    """A target cannot close the <target-data> wrapper from inside: every
+    spelling of the closing tag (case, inner spaces) is broken."""
+    return CLOSING_TAG_RE.sub(lambda m: f"<{m.group(1)}\\/{m.group(2)}target-data", text)
+
+
 def inert_scalar(value: object) -> str:
     """A scalar from a reconnaissance return on one line: the text is
     target-derived, so it may not open a new list item, heading or tag of
     its own — newlines fold to spaces and a closing target-data tag is
     broken."""
-    return " ".join(str(value).split()).replace("</target-data", "<\\/target-data")
+    return break_closing_tag(" ".join(str(value).split()))
 
 
 def inert_prose(text: str) -> str:
@@ -1056,7 +1065,7 @@ def inert_prose(text: str) -> str:
         stripped = line.lstrip()
         if stripped[:1] in ("#", "-", "*", "<", ">", "|", "`"):
             line = "\\" + stripped
-        lines.append(line.replace("</target-data", "<\\/target-data"))
+        lines.append(break_closing_tag(line))
     return "\n".join(lines).strip()
 
 
