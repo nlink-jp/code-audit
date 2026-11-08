@@ -101,3 +101,9 @@ constants are quick 0.45 / standard 0.30 candidates per unit and 15% re-asks. E2
 (whole-tree units alone with their hunter), E28 (reading pinned dependencies and GOROOT,
 cited in prose) and the rule for passing the cost gate again (once, on a shortfall the
 books show) are SKILL.md wording.
+
+Carried from the commit-time review of cut (8) (candidate E29): the wrapper's closing tag
+is the fixed `</target-data>`, so target-derived text can forge a closer. For architecture.md
+the script breaks every spelling; for pasted briefs and logs the procedure relies on the
+parent. Putting the nonce on the closing tag too (`</target-data-N>`) is the real fix and
+changes every prompt's contract, so it is decided at the next cut.
