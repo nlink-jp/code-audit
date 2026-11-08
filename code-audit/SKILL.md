@@ -195,7 +195,14 @@ always present; add `HOME` only when the toolchain needs it; never a variable
 that holds a credential), `timeout_sec`, `writes` (relative paths the command
 creates), `source`. **Forbid** anything that reaches the network, reads
 credentials, writes outside the target, fetches dependencies, or has no
-bounded duration; say which. Validate: `run.py validate RUN`.
+bounded duration; say which. A toolchain **cache** is not a write outside
+the target: `exec` points `GOCACHE`, `XDG_CACHE_HOME` and
+`PYTHONPYCACHEPREFIX` at `RUN/cache/` and sets `GOPROXY=off`,
+`GOFLAGS=-mod=readonly`, `GOTOOLCHAIN=local`, so a Go test suite whose
+modules are already in the module cache (allow `HOME` for it) runs without
+the network; one that would have to download a module or a toolchain fails
+there instead of reaching out, and a command that needs that download
+stays forbidden. Validate: `run.py validate RUN`.
 
 **Run every allowed command once, now**, from the parent:
 
@@ -255,9 +262,11 @@ python3 SKILL_DIR/scripts/ledger.py estimate RUN [--tokens-per-invocation N]
 
 Give `--tokens-per-invocation` the average input size you measured in
 reconnaissance (prompt plus files read), when known. Show the user: the
-profile, `hunters`, `critics`, `verification_stages`, `expected_candidates`,
-`verifiers`, `total_invocations`, `tokens_estimate`, and whether it fits the
-recorded budget. Then **ask with AskUserQuestion**: approve this estimate,
+profile, `hunters` (planned units grouped `units_per_hunter` at a time),
+`critics`, `verification_stages`, `expected_candidates`, `verifiers`,
+`reruns` (the re-asks a run of this size needs, about one in five returns),
+`total_invocations`, `tokens_estimate`, and whether it fits the recorded
+budget. Then **ask with AskUserQuestion**: approve this estimate,
 approve with a lower budget, or stop here. Record the answer:
 
 ```
@@ -273,7 +282,8 @@ that would spend what critics and verifiers need.
 ## Phase 3 — Hunting
 
 **Assignment.** `ledger.py status RUN` lists `planned` units. Group them by
-starting paths and subsystem, up to four units per hunter, and assign:
+starting paths and subsystem, three or four units per hunter (the estimate
+assumed three), and assign:
 
 ```
 python3 SKILL_DIR/scripts/ledger.py assign RUN --agent hunter-N <coverage-id>...

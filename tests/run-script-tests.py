@@ -284,6 +284,10 @@ class RunPyTests(RunFixture):
         names = set(json.loads(log.split("--- stdout ---\n", 1)[1].split("\n--- stderr ---", 1)[0].strip()))
         self.assertIn("PATH", names)
         self.assertIn("HOME", names)
+        # E6 (E2E 2026-11-08): toolchain caches live under the run, downloads are off
+        self.assertTrue({"GOCACHE", "GOPROXY", "GOFLAGS", "GOTOOLCHAIN", "XDG_CACHE_HOME", "PYTHONPYCACHEPREFIX"} <= names)
+        self.assertTrue((self.run_dir / "cache" / "go-build").is_dir())
+        self.assertIn("GOPROXY", log.split("--- stdout ---", 1)[0])
         self.assertNotIn("CODE_AUDIT_TEST_SECRET", names)
         self.assertNotIn("ANOTHER_TOKEN", names)
         self.assertNotIn("leak-me", log)
@@ -966,7 +970,10 @@ class LedgerTests(RunFixture):
     def test_defer_and_estimate(self) -> None:
         self.seed()
         est = self.ok(run("ledger.py", "estimate", str(self.run_dir), "--tokens-per-invocation", "50000"))
-        self.assertEqual((est["hunters"], est["critics"], est["verification_stages"]), (2, 3, 2))
+        # E5 (E2E 2026-11-08): two planned units are one hunter; re-asks are budgeted
+        self.assertEqual((est["hunters"], est["units_per_hunter"], est["critics"], est["verification_stages"]), (1, 3, 3, 2))
+        self.assertEqual(est["total_invocations"], est["spent"] + est["hunters"] + est["critics"] + est["verifiers"] + est["reruns"])
+        self.assertGreaterEqual(est["reruns"], 1)
         self.assertEqual(est["tokens_estimate"], est["total_invocations"] * 50000)
         self.assertTrue(est["fits_budget"])
         self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "2"))

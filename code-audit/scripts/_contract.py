@@ -40,6 +40,7 @@ CANDIDATES_FILE = "candidates.json"
 NOTES_FILE = "notes.json"
 REPLACEMENTS_FILE = "replacements.json"
 CHECKS_DIR = "checks"
+CACHE_DIR = "cache"  # toolchain caches run.py exec redirects under the run
 
 
 # ---------------------------------------------------------------------------

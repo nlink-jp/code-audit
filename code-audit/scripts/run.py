@@ -524,6 +524,22 @@ def cmd_exec(args: argparse.Namespace) -> None:
     for name in entry["env_allow"]:
         if name in os.environ:
             env[name] = os.environ[name]
+    # A toolchain cache is not a write outside the target: it lands under
+    # the run, and the toolchains that would otherwise reach the network for
+    # a module or a newer toolchain are told not to. These override anything
+    # env_allow passed through. (E2E 2026-11-08: a Go target could produce
+    # no existing_test evidence because its build cache lived under HOME.)
+    cache = run_dir / c.CACHE_DIR
+    for sub in ("go-build", "xdg", "pycache"):
+        (cache / sub).mkdir(parents=True, exist_ok=True)
+    env.update({
+        "GOCACHE": str(cache / "go-build"),
+        "GOFLAGS": "-mod=readonly",
+        "GOPROXY": "off",
+        "GOTOOLCHAIN": "local",
+        "XDG_CACHE_HOME": str(cache / "xdg"),
+        "PYTHONPYCACHEPREFIX": str(cache / "pycache"),
+    })
     log_path = run_dir / c.CHECKS_DIR / f"{entry['id']}.log"
     log_path.parent.mkdir(exist_ok=True)
     started = time.monotonic()
@@ -556,7 +572,8 @@ def cmd_exec(args: argparse.Namespace) -> None:
         f"command_id: {entry['id']}",
         f"argv: {entry['argv']}",
         f"cwd: {entry['cwd']}",
-        f"env_allow: {sorted(env)}",
+        f"env_allow: {sorted(entry['env_allow'])}",
+        f"env_set: {sorted(k for k in env if k not in entry['env_allow'] and k != 'PATH')} (caches under {c.CACHE_DIR}/, no module or toolchain downloads)",
         f"timeout_sec: {entry['timeout_sec']}",
         f"timed_out: {timed_out}",
         f"exit_code: {exit_code}",

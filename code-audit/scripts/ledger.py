@@ -988,6 +988,11 @@ def counts(units: list) -> dict:
     return out
 
 
+UNITS_PER_HUNTER = 3
+CANDIDATES_PER_UNIT = 0.5
+RERUN_RATE = 0.2
+
+
 def estimate_numbers(meta: dict, units: list, candidates: dict) -> dict:
     """The one arithmetic of the cost gate: what the remaining work costs in
     invocations and what must stay reserved for critics and verifiers."""
@@ -997,18 +1002,25 @@ def estimate_numbers(meta: dict, units: list, candidates: dict) -> dict:
     pending = len(candidates["candidates"]) + len(candidates["carried"])
     stages = 1 if quick else 2
     critics = 1 if quick else 3
-    expected_candidates = pending + max(1, math.ceil(hunting * 0.3))
+    # Measured on the first E2E pass (2026-11-08, webhook-relay quick): one
+    # hunter takes about three units, about one candidate in two units
+    # survives de-duplication, and about one return in five is re-asked.
+    hunters = math.ceil(planned / UNITS_PER_HUNTER) if planned else 0
+    expected_candidates = pending + max(1, math.ceil(hunting * CANDIDATES_PER_UNIT))
     verifiers = expected_candidates * stages
+    reruns = math.ceil((hunters + critics + verifiers) * RERUN_RATE)
     spent = sum(meta["invocations"].values())
     return {
         "profile": meta["profile"],
         "spent": spent,
-        "hunters": planned,
+        "hunters": hunters,
+        "units_per_hunter": UNITS_PER_HUNTER,
         "critics": critics,
         "verification_stages": stages,
         "expected_candidates": expected_candidates,
         "verifiers": verifiers,
-        "total_invocations": spent + planned + critics + verifiers,
+        "reruns": reruns,
+        "total_invocations": spent + hunters + critics + verifiers + reruns,
         "budget": meta["budget"],
         "approved": bool(meta.get("approved")),
         "reserve_for_critics_and_verifiers": critics + verifiers,
