@@ -653,6 +653,64 @@ class LedgerTests(RunFixture):
         self.ok(run("ledger.py", "validate", str(self.run_dir)))
         self.assertEqual(self.ok(run("ledger.py", "status", str(self.run_dir)))["counts"], {"candidate": 1, "covered": 2})
 
+    def test_reassigning_a_unit_with_pending_candidates_is_refused(self) -> None:
+        self.hunt()
+        u1, u2 = self.unit_ids()
+        critic = {"agent_id": "critic-1", "missing_units": [], "reassign_ids": [{"coverage_id": u1, "reason": "missed the symlink path"}], "resolved_prior_leads": [], "stop": False}
+        self.refused(run("ledger.py", "merge-critic", str(self.run_dir), str(self.write_json(critic, "c.json")), "--target", str(self.target)), "has pending candidates")
+        for i in (0, 1):
+            self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(i), f"r{i}.json"))))
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.fill("record-rejected.json"))))
+        for fp, v in (("app/files.py:read_user_file:path-traversal", "confirmed"), ("app/files.py:read_user_file:symlink-escape", "needs_validation"), ("app/files.py:list_user_files:enumeration", "rejected")):
+            self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", v))
+        out = self.ok(run("ledger.py", "merge-critic", str(self.run_dir), str(self.write_json(critic, "c2.json")), "--target", str(self.target)))
+        self.assertEqual(out["reassigned"], [u1])
+        unit = next(u for u in self.ledger() if u["coverage_id"] == u1)
+        self.assertEqual((unit["status"], unit["decisions"], len(unit["attempts"][0]["decisions"])), ("planned", {}, 3))
+        self.ok(run("ledger.py", "validate", str(self.run_dir)))
+        self.ok(run("findings.py", "validate", str(self.run_dir)))
+
+    def test_blocked_units_can_be_deferred_and_status_lists_them(self) -> None:
+        self.seed()
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1, u2))
+        result = self.hunter_result()
+        result["units"][1]["disposition"] = "blocked"
+        result["units"][1]["checks"][0]["method"] = "source"
+        result["units"][1]["checks"][0]["check_log"] = None
+        result["units"][1]["unresolved"] = ["whether list_user_files output reaches a shell is decided in a caller outside the repository"]
+        self.ok(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "blocked.json"))))
+        status = self.ok(run("ledger.py", "status", str(self.run_dir)))
+        self.assertEqual([b["coverage_id"] for b in status["blocked"]], [u2])
+        self.assertEqual(status["uncovered"][0]["surface"], "Makefile#fetch")
+        self.refused(run("ledger.py", "defer", str(self.run_dir), "--reason", "x", u1), "only planned or blocked")
+        out = self.ok(run("ledger.py", "defer", str(self.run_dir), "--reason", "needs the caller", u2))
+        self.assertEqual(out["deferred"], [u2])
+        unit = next(u for u in self.ledger() if u["coverage_id"] == u2)
+        self.assertEqual((unit["status"], unit["agent_id"], unit["attempts"][0]["status"]), ("deferred", None, "blocked"))
+        self.ok(run("ledger.py", "validate", str(self.run_dir)))
+
+    def test_candidates_name_proposed_verdict_and_every_claiming_unit(self) -> None:
+        self.seed()
+        self.ok(run("run.py", "exec", str(self.run_dir), "unit-tests", "--target", str(self.target)))
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1, u2))
+        result = self.hunter_result()
+        result["candidates"][0]["verdict"] = "needs_validation"
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "both.json"))), "never verdict")
+        result = self.hunter_result()
+        result["candidates"][0]["coverage_ids"] = [u2]
+        self.refused(run("ledger.py", "record", str(self.run_dir), str(self.write_json(result, "cov.json"))), "must include every unit that lists this fingerprint")
+
+    def test_seed_refuses_an_unknown_class_reference(self) -> None:
+        props = json.loads((FIXTURES / "units.json").read_text(encoding="utf-8"))
+        bad = json.loads(json.dumps(props[0]))
+        bad["canonical_refs"]["attack_class"] = "classes/generic.md#No Such Class"
+        self.refused(run("ledger.py", "seed", str(self.run_dir), "--target", str(self.target), "--units", str(self.write_json([bad], "bad.json"))), "no such class")
+        bad = json.loads(json.dumps(props[0]))
+        bad["excluded_classes"] = [{"block": "classes/cli.md#Nope", "reason": "x"}]
+        self.refused(run("ledger.py", "seed", str(self.run_dir), "--target", str(self.target), "--units", str(self.write_json([bad], "bad2.json"))), "no such class")
+
     def test_merge_critic_quick_defers_instead(self) -> None:
         quick = self.tmpdir / "out" / "quick"
         self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(quick), "--profile", "quick"))
@@ -913,6 +971,29 @@ class PriorRunTests(RunFixture):
         self.assertIn("### Prior records that no current unit covers (no verdict)", en)
         self.assertIn("app/files.py:read_user_file:path-traversal", en)
         self.assertNotIn("| high |", en)
+
+    def test_a_suppressed_claim_is_not_queued_again(self) -> None:
+        self.complete_run()
+        run2 = self.tmpdir / "out" / "run-2"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
+        self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.ok(run("run.py", "approve", str(run2), "--budget", "40"))
+        shutil.copy(FIXTURES / "commands.json", run2 / "commands.json")
+        self.ok(run("run.py", "exec", str(run2), "unit-tests", "--target", str(self.target)))
+        units = json.loads((run2 / "coverage-ledger.json").read_text(encoding="utf-8"))
+        u1 = next(u["coverage_id"] for u in units if u["attack_class"] == "Resource and file handling")
+        u2 = next(u["coverage_id"] for u in units if u["attack_class"] == "Injection")
+        self.ok(run("ledger.py", "assign", str(run2), "--agent", "hunter-7", u1, u2))
+        result = json.loads((FIXTURES / "hunter-result.json").read_text(encoding="utf-8").replace("__U1__", u1).replace("__U2__", u2).replace("__D1__", self.d1).replace("__D2__", self.d2))
+        result["agent_id"] = "hunter-7"
+        for ru in result["units"]:
+            for chk in ru["checks"]:
+                chk["agent_id"] = "hunter-7"
+        out = self.ok(run("ledger.py", "record", str(run2), str(self.write_json(result, "again.json"))))
+        self.assertEqual(out["suppressed_candidates"], ["app/files.py:list_user_files:enumeration"])
+        self.assertEqual(sorted(out["duplicate_candidates"]), ["app/files.py:read_user_file:path-traversal", "app/files.py:read_user_file:symlink-escape"])
+        self.assertEqual(out["queued_candidates"], [])
+        self.ok(run("ledger.py", "validate", str(run2)))
 
     def test_carried_record_on_a_deferred_unit_is_decidable(self) -> None:
         self.complete_run()

@@ -28,6 +28,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _contract as c  # noqa: E402
+import classes as class_files  # noqa: E402
+
+_CLASS_REFS: set[str] | None = None
+
+
+def known_class_refs() -> set[str]:
+    """`classes/<file>#<heading>` for every shipped hunting class."""
+    global _CLASS_REFS
+    if _CLASS_REFS is None:
+        found, errors = class_files.load_classes(class_files.DEFAULT_CLASSES)
+        _CLASS_REFS = {f"classes/{cl['file']}#{cl['name']}" for cl in found} if not errors else set()
+    return _CLASS_REFS
+
+
+def class_ref_error(ref: str) -> str | None:
+    if not ref.startswith("classes/"):
+        return None
+    if ref not in known_class_refs():
+        return f"no such class '{ref}' (classes.py list prints them)"
+    return None
 
 VERDICTS = ("confirmed", "needs_validation", "rejected")
 EVIDENCE_STATES = ("blocked", "covered", "candidate")
@@ -80,6 +100,10 @@ def build_unit(proposal: dict, profile: str, target: Path, where: str) -> tuple[
     for p in proposal["starting_paths"]:
         if not c.is_repo_relative(p):
             errors.append(f"{where}.starting_paths: '{p}' must be repository-relative")
+    for label, ref in [("canonical_refs.attack_class", refs["attack_class"])] + [(f"selected_classes[{i}]", r) for i, r in enumerate(proposal["selected_classes"])] + [(f"excluded_classes[{i}].block", x["block"]) for i, x in enumerate(proposal["excluded_classes"])]:
+        err = class_ref_error(ref)
+        if err:
+            errors.append(f"{where}.{label}: {err}")
     if errors:
         return None, errors
     unit = {
@@ -527,6 +551,8 @@ def candidate_as_record(cand: dict, where: str) -> tuple[dict | None, list[str]]
     pv = cand.get("proposed_verdict")
     if pv not in ("confirmed", "needs_validation"):
         return None, [f"{where}.proposed_verdict: must be confirmed or needs_validation"]
+    if "verdict" in cand:
+        return None, [f"{where}: a candidate carries proposed_verdict, never verdict; the verifier decides"]
     rec = {k: v for k, v in cand.items() if k != "proposed_verdict"}
     rec = {"verdict": pv, **rec}
     return rec, []
@@ -652,8 +678,11 @@ def cmd_record(args: argparse.Namespace) -> None:
         errors.append(f"result.units: every unit assigned to {agent} appears exactly once; missing {sorted(missing)}")
     claimed = {fp for ru in reported.values() for fp in ru["candidate_fingerprints"]}
     known = {r["fingerprint"] for key in ("candidates", "carried", "decided") for r in candidates.get(key, [])}
+    suppressed_fps = {r["fingerprint"] for r in candidates.get("suppressed", [])}
+    claimants = {fp: {cid for cid, ru in reported.items() if fp in ru["candidate_fingerprints"]} for fp in claimed}
     accepted: list[dict] = []
     duplicates: list[str] = []
+    suppressed: list[str] = []
     for i, cand in enumerate(result["candidates"]):
         cb = f"result.candidates[{i}]"
         rec, errs = candidate_as_record(cand, cb)
@@ -670,13 +699,21 @@ def cmd_record(args: argparse.Namespace) -> None:
         if not set(rec["coverage_ids"]) <= set(reported):
             errors.append(f"{cb}.coverage_ids: must be among the reported units")
             continue
+        if not claimants[rec["fingerprint"]] <= set(rec["coverage_ids"]):
+            errors.append(f"{cb}.coverage_ids: must include every unit that lists this fingerprint: {sorted(claimants[rec['fingerprint']])}")
+            continue
+        if rec["fingerprint"] in suppressed_fps:
+            # The same claim was rejected by a prior run and its sources are
+            # unchanged: it is not queued again. The unit keeps the note.
+            suppressed.append(rec["fingerprint"])
+            continue
         if rec["fingerprint"] in known or any(a["fingerprint"] == rec["fingerprint"] for a in accepted):
             duplicates.append(rec["fingerprint"])
             continue
         rec["agent_id"] = agent
         accepted.append(rec)
     for fp in claimed:
-        if not any(a["fingerprint"] == fp for a in accepted) and fp not in duplicates and fp not in known:
+        if not any(a["fingerprint"] == fp for a in accepted) and fp not in duplicates and fp not in suppressed and fp not in known:
             errors.append(f"result.candidates: fingerprint '{fp}' is claimed by a unit but no candidate record was returned")
     c.fail_if(errors)
     for cid, ru in reported.items():
@@ -688,6 +725,8 @@ def cmd_record(args: argparse.Namespace) -> None:
         u["unresolved"] = list(ru["unresolved"])
         if duplicates:
             u.setdefault("notes", []).extend(f"duplicate candidate fingerprint {fp} not queued twice" for fp in duplicates if fp in ru["candidate_fingerprints"])
+        if suppressed:
+            u.setdefault("notes", []).extend(f"candidate {fp} suppressed: rejected by a prior run with unchanged sources" for fp in suppressed if fp in ru["candidate_fingerprints"])
     candidates["candidates"].extend(accepted)
     for unc in result["uncovered"]:
         candidates["uncovered"].append({**unc, "agent_id": agent})
@@ -701,6 +740,7 @@ def cmd_record(args: argparse.Namespace) -> None:
         "units": {cid: ru["disposition"] for cid, ru in reported.items()},
         "queued_candidates": [a["fingerprint"] for a in accepted],
         "duplicate_candidates": duplicates,
+        "suppressed_candidates": suppressed,
         "uncovered": len(result["uncovered"]),
         "notes": len(result["notes"]),
     })
@@ -715,11 +755,13 @@ def archive_attempt(u: dict, reason: str) -> None:
         "checks": u["checks"],
         "result_fingerprints": u["result_fingerprints"],
         "unresolved": u["unresolved"],
+        "decisions": dict(u["decisions"]),
         "reassignment_reason": reason,
     })
     u["wave"] += 1
     u["agent_id"] = None
     u["reviewed_paths"], u["checks"], u["result_fingerprints"], u["unresolved"] = [], [], [], []
+    u["decisions"] = {}
 
 
 def cmd_merge_critic(args: argparse.Namespace) -> None:
@@ -744,12 +786,15 @@ def cmd_merge_critic(args: argparse.Namespace) -> None:
                 unit["status"] = "deferred"
                 unit["unresolved"] = [f"quick_profile_final_critic: {prop.get('reason', 'proposed by the final critic')}"]
             new_units.append(unit)
+    pending_fps = {r["fingerprint"] for key in ("candidates", "carried") for r in candidates[key]}
     for i, ra in enumerate(critic["reassign_ids"]):
         u = ids.get(ra["coverage_id"])
         if u is None:
             errors.append(f"critic.reassign_ids[{i}]: no such unit")
         elif u["status"] not in EVIDENCE_STATES:
             errors.append(f"critic.reassign_ids[{i}]: only blocked, covered or candidate units can be reassigned (is {u['status']})")
+        elif any(fp in pending_fps for fp in u["result_fingerprints"]):
+            errors.append(f"critic.reassign_ids[{i}]: {u['coverage_id']} has pending candidates; decide them first, or propose the missed surface as a missing unit")
     c.fail_if(errors)
     already = [nu["coverage_id"] for nu in new_units if nu["coverage_id"] in ids]
     fresh = [nu for nu in new_units if nu["coverage_id"] not in ids]
@@ -859,10 +904,12 @@ def cmd_defer(args: argparse.Namespace) -> None:
     unknown = [x for x in (args.coverage_ids or []) if x not in ids]
     if unknown:
         c.die(f"no such unit: {unknown}")
-    bad = [u["coverage_id"] for u in targets if u["status"] != "planned"]
+    bad = [u["coverage_id"] for u in targets if u["status"] not in ("planned", "blocked")]
     if bad:
-        c.die(f"only planned units can be deferred: {bad}")
+        c.die(f"only planned or blocked units can be deferred: {bad}")
     for u in targets:
+        if u["status"] == "blocked":
+            archive_attempt(u, f"deferred while blocked: {args.reason}")
         u["status"] = "deferred"
         u["unresolved"] = [args.reason]
     save_ledger(run_dir, units, candidates)
@@ -975,8 +1022,10 @@ def cmd_status(args: argparse.Namespace) -> None:
         "pending_candidates": [r["fingerprint"] for r in candidates["candidates"]],
         "pending_carried": [r["fingerprint"] for r in candidates["carried"]],
         "decided": candidates["decided"],
-        "uncovered": len(candidates["uncovered"]),
+        "uncovered": candidates["uncovered"],
+        "blocked": [{"coverage_id": u["coverage_id"], "unresolved": u["unresolved"]} for u in units if u["status"] == "blocked"],
         "suppressed": [r["fingerprint"] for r in candidates["suppressed"]],
+        "unlinked_prior": [r["fingerprint"] for r in candidates["unlinked_prior"]],
     })
 
 

@@ -170,6 +170,7 @@
               "checks": { "type": "array", "items": { "type": "object" } },
               "result_fingerprints": { "type": "array", "items": { "type": "string" } },
               "unresolved": { "type": "array", "items": { "type": "string" } },
+              "decisions": { "type": "object" },
               "reassignment_reason": { "type": "string", "minLength": 1 }
             }
           }
