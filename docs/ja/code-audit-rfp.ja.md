@@ -468,3 +468,10 @@ compliance-review / incident-review と並ぶ。
   検証者 brief の trace / evidence 必須欄、個人識別子とローカルパスを返答に綴らせない
   （スクリプトが拒む）、見積もりに再検証者、hunter brief にファイル一覧、報告書の置換行の
   種別。Phase 3（4 走）はこれで完了。
+- **2026-11-08 区切り (9)（第 4 走の採用分）**: E29〜E35 を採用（101 テスト緑）。E29 は
+  nonce を閉じタグにも載せる包み方（`<target-data-N>…</target-data-N>`、`run.py nonce` が
+  両タグを印字）。E30・E31・E33・E34・E35 はスクリプト（`prior_needs_validation_changed_source`、
+  brief の trace / evidence 必須欄、見積もりの再検証者、`brief hunter --target` のファイル一覧、
+  置換の `weakened` と報告書の種別）。E32 は契約文（綴らず記述）と、帳簿の入口で実行者の
+  ログイン・絶対ローカルパスを拒むスクリプトの両方。E36 は実測待ち。Phase 3 の区切りはこれで終わり、
+  残りはリリース。

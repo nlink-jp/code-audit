@@ -11,7 +11,7 @@ covered in a ledger. Design: the [RFP](docs/en/code-audit-rfp.md)
 > repository. Phase 3 is done: four end-to-end runs on two real repositories
 > with the cost recorded (`docs/{ja,en}/reviews/`) and two independent
 > verification rounds over the implementation. What remains before v0.1.0 is
-> the last cut of lessons from the fourth run and the release.
+> the release.
 
 **What it will do.** The parent agent runs six phases over isolated
 sub-agents: reconnaissance; coverage-led hunting waves; adversarial validation
@@ -117,7 +117,14 @@ synthesis `architecture.md` is composed by a script from the saved returns
 carry the candidate's proposed verdict and root cause and the required fields
 of each verdict; invalid JSON is refused with its position and context; the
 estimate subtracts launched critics, uses the real queue once hunting is
-over, and takes a per-profile candidate rate.
+over, and takes a per-profile candidate rate. From the fourth run
+(`docs/en/reviews/2026-11-08-e2e-standard-web-fetch.md`): the nonce sits on
+both wrapper tags; a return that spells the operator's login or an absolute
+local path is refused wherever it enters the books (the agent describes,
+never spells); the hunter's brief lists the files under its units' starting
+paths; the verifier's brief names the fields of trace and evidence entries;
+the estimate counts the re-verification of decided records; the report
+counts weakening replacements apart from wording fixes.
 Residual risks are in the RFP: the target's own tests run unsandboxed as
 your user, and whether a sub-agent really has no shell depends on the agent
 type the runtime offers.

@@ -153,9 +153,23 @@
   spelled in a return, refused by the scripts; re-verifiers in the estimate;
   a file listing in the hunter's brief; the report's replacement line by
   kind of difference.
+- Cut (9), the fourth run's adopted lessons (E29–E35; E36 waits for more
+  measurements): `run.py nonce` prints both wrapper tags and SKILL.md puts
+  the nonce on the closing tag too (`<target-data-N>…</target-data-N>`);
+  `seed --prior` marks a needs_validation lead whose source changed as
+  `prior_needs_validation_changed_source`; the verifier's and re-verifier's
+  briefs list the required fields of `trace_entry` and `evidence_entry`;
+  `record`, `merge-critic`, `architecture`, `findings.py add` and `note`
+  refuse a return that spells the operator's login or an absolute local
+  path (every role's contract says: describe, never spell); the estimate
+  counts one re-verifier per decided record in `standard`;
+  `brief hunter --target` lists the files under each unit's starting paths
+  (capped, links unfollowed, `.git` skipped); the replacement log records
+  the fields a replacement weakened and the report counts strengthening,
+  weakening and wording replacements apart. 101 tests.
 
 ### Planned for 0.1.0
 
 Phase 3's four end-to-end runs are done (`webhook-relay` quick and standard,
-`web-fetch` quick and standard; records in `docs/{ja,en}/reviews/`). Left:
-cut 9 (E29–E36), then release per the organization checklist.
+`web-fetch` quick and standard; records in `docs/{ja,en}/reviews/`) and cut 9
+is applied. Left: release per the organization checklist.

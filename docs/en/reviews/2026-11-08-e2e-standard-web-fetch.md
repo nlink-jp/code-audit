@@ -116,3 +116,20 @@ Both standard runs landed inside their estimates (run 2 at two thirds, run 4
 on target). Carry-over from quick to standard worked for the first time in
 run 4: one of run-1's rejections suppressed a re-report, and the seven fixed
 records cost no re-verification and were listed as changed prior records.
+
+## Adopted in cut (9) (2026-11-08)
+
+E29–E35 adopted (101 tests); E36 waits for more measurements. E29: `run.py nonce`
+prints both tags and SKILL.md wraps with `<target-data-N>…</target-data-N>` (the
+closing-tag breaking in architecture.md stays as defence in depth). E30: `seed --prior`
+marks `prior_needs_validation_changed_source`. E31: the verifier's and re-verifier's
+briefs list the required fields of `trace_entry` and `evidence_entry`, and the SKILL
+contract reads the field names from the brief. E32: `_contract.personal_identifier_errors`
+(the operator's login as a whole word when three characters or longer, absolute local
+paths by pattern) runs where `record`, `merge-critic`, `architecture`, `findings.py add`
+and `note` take a return, and every role's contract says describe at file:line, never
+spell. E33: the standard estimate adds one re-verifier per decided record, minus those
+launched. E34: `brief hunter --target TARGET` carries the files under each unit's
+starting paths (cap 400, links by name, `.git` skipped). E35: `findings.py add --replace`
+logs `weakened` and the report's replacement line counts strengthening, weakening and
+wording apart.

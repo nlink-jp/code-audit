@@ -543,3 +543,13 @@ independent pass), it sits beside compliance-review and incident-review.
   in a return (refused by the scripts), re-verifiers in the estimate, a file
   listing in the hunter's brief, the report's replacement line by kind. Phase
   3 (four runs) is complete.
+- **2026-11-08 cut (9) (the fourth run's adopted lessons)**: E29–E35 adopted
+  (101 tests). E29 puts the nonce on the closing tag too
+  (`<target-data-N>…</target-data-N>`, both printed by `run.py nonce`). E30,
+  E31, E33, E34 and E35 are script changes (`prior_needs_validation_changed_source`,
+  the briefs' trace / evidence required fields, re-verifiers in the estimate,
+  `brief hunter --target`'s file listing, the replacement log's `weakened` and
+  the report's wording by kind). E32 is both contract wording (describe, never
+  spell) and a script refusal of the operator's login and absolute local paths
+  wherever a return enters the books. E36 waits for more measurements. The
+  Phase 3 cuts end here; the release remains.

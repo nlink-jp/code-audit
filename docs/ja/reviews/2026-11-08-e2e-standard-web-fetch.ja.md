@@ -99,3 +99,17 @@ runtime の層）。rejected 6 件はすべて hardening に格下げ。再検�
 standard の 2 走はいずれも見積もりの範囲に収まった（第 2 走は 2/3、第 4 走はほぼ一致）。
 quick → standard の持ち越しは第 4 走で初めて同一 profile 系列で働き、run-1 の rejected が
 1 件の再報告を抑え、修正済みの 7 件は再検証を費やさず「変更済み」として列挙された。
+
+## 区切り (9) での採用（2026-11-08）
+
+E29〜E35 を採用した（101 テスト緑）。E36 は実測待ちで据え置き。E29: `run.py nonce` が開きと閉じの
+両タグを印字し、SKILL は `<target-data-N>…</target-data-N>` で包む（architecture.md 側の閉じタグ
+潰しはそのまま残す）。E30: `seed --prior` が `prior_needs_validation_changed_source` を付ける。
+E31: verifier / reverifier の brief が `trace_entry`・`evidence_entry` の必須欄も印字し、SKILL の
+契約は brief の欄名を引く。E32: `_contract.personal_identifier_errors`（実行者のログインを
+3 文字以上のとき単語一致で、絶対ローカルパスを正規表現で）を `record`・`merge-critic`・
+`architecture`・`findings.py add`・`note` の入口で走らせ、全役の契約に「綴らず file:line で記述」。
+E33: standard の見積もりに決定済みレコード 1 件あたり再検証者 1 を足す（起動済みは引く）。
+E34: `brief hunter --target TARGET` が単位の starting_paths 配下のファイル一覧を運ぶ（上限 400、
+リンクは名前のみ、`.git` は除く）。E35: `findings.py add --replace` が `weakened` を記録し、
+報告書の置換行は強化・弱化・文言を分けて数える。
