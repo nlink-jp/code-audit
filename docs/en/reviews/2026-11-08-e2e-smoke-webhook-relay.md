@@ -81,3 +81,15 @@ both `needs_validation`s name the same library fact (the meaning of
 
 The 21% re-ask rate is included. Fixing E3, E4, E8 and E9 in cut 6 first
 should at least halve the re-asks.
+
+## Adopted in cut 6 (2026-11-08)
+
+All of E1–E12 were adopted (commits `31913ad`–`9b1c6ac`, 92 tests green).
+E7 is settled by `ledger.py merge-candidates` (duplicates folded before
+verification); the `verdicts[]` array shape does not enter the contract. E8
+is `ledger.py brief critic|verifier`, which removes two of the deviations
+above (the paraphrased coverage ids and the hand-made to-verify files). E11
+adds `lead` as a note kind that the next run's `seed --prior` puts into the
+critic's brief. The estimate's constants (3 units per hunter, 0.5 candidates
+per unit, 20% re-asks) come from this one pass and are revisited over the
+remaining three runs.
