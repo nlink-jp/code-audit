@@ -488,3 +488,4 @@ compliance-review / incident-review と並ぶ。
   あるかで分ける（fresh 0.60 / prior 0.30、`shortfall`）、E39 所有者の受け入れを
   `findings.py accept` で run に記録し `seed --prior` が再検証・再報告を止める、E40
   knowledge の新しい教訓 4 件をクラスに追随（54 クラス・出典 119）。
+- **2026-11-09 v0.2.0 リリース**: 区切り (10) とコミット時レビューの採用分（109 テスト緑）を公開。

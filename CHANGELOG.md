@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-11-09
 
 Cut (10): lessons E37–E40 of the first production run (gem-agent, standard,
 no prior; `docs/{ja,en}/reviews/2026-11-09-standard-gem-agent*.md`).

@@ -12,7 +12,7 @@ coverage ledger and a human-approved cost gate. Hunting classes come from the
 organization's recorded defects (MCP servers, CLIs, LLM agent runtimes)
 beside generic classes. Invoked as `/code-audit <target-dir> ...`.
 
-**Status: v0.1.0 released 2026-11-09.** The five bookkeeping
+**Status: v0.2.0 released 2026-11-09.** The five bookkeeping
 scripts, the data contracts, the four hunting-class files (52 classes, 123
 citations verified against the knowledge, ADR and origin checkouts on
 2026-11-08) and the six-phase SKILL.md for both profiles exist and are
@@ -24,7 +24,7 @@ runs are done with cost recorded (`docs/{ja,en}/reviews/`); cut 8 applied
 the first three runs' lessons and cut 9 the fourth run's (E29–E35; E36
 waits for more measurements). Released as v0.1.0 on 2026-11-09. The first
 production run (gem-agent, standard, no prior, 2026-11-09) gave E37–E40,
-applied in cut 10 (unreleased): rule 3 and the two record fields, the
+applied in cut 10 and released as v0.2.0 the same day: rule 3 and the two record fields, the
 estimate's fresh/prior rates, the owner's dispositions, four new citations
 (54 classes, 119 citations).
 

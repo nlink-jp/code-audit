@@ -5,7 +5,7 @@ vulnerabilities that actually cross a trust boundary, and shows what was
 covered in a ledger. Design: the [RFP](docs/en/code-audit-rfp.md)
 (Japanese primary: [RFP (ja)](docs/ja/code-audit-rfp.ja.md)).
 
-> **Status: v0.1.0.** The bookkeeping scripts, the data contracts, the
+> **Status: v0.2.0.** The bookkeeping scripts, the data contracts, the
 > hunting classes and the six-phase SKILL.md exist for both profiles, with
 > tests over a fixture repository. Before the release: four end-to-end runs
 > on two real repositories with the cost recorded (`docs/{ja,en}/reviews/`)

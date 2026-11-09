@@ -570,3 +570,5 @@ independent pass), it sits beside compliance-review and incident-review.
   `shortfall`), E39 the owner's acceptance logged with `findings.py accept`
   so `seed --prior` stops re-verifying and re-reporting it, E40 four new
   knowledge lessons in the classes (54 classes, 119 citations).
+- **2026-11-09 v0.2.0 release**: cut (10) and the adopted commit-time review
+  findings (109 tests) published.
