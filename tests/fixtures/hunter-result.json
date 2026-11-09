@@ -44,6 +44,8 @@
       "description": "A caller-supplied name containing '../' selects a file outside base_dir.",
       "root_cause": "os.path.join is used without normalising the result or checking that it stays under base_dir.",
       "intended_behavior": "Only files directly under base_dir are readable by name.",
+      "path_actor": "unasked",
+      "specified_in": "none",
       "trace": [
         {"kind": "entrypoint", "file": "app/files.py", "line": 6, "scope": "read_user_file", "description": "name arrives from the caller"},
         {"kind": "propagation", "file": "app/files.py", "line": 9, "scope": "read_user_file", "description": "os.path.join(base_dir, name) keeps '../' components"},

@@ -40,6 +40,7 @@ COMMANDS_FILE = "commands.json"
 CANDIDATES_FILE = "candidates.json"
 NOTES_FILE = "notes.json"
 REPLACEMENTS_FILE = "replacements.json"
+DISPOSITIONS_FILE = "dispositions.json"  # the owner's triage of confirmed records (E39), written by findings.py accept
 CHECKS_DIR = "checks"
 CACHE_DIR = "cache"  # toolchain caches run.py exec redirects under the run
 
@@ -479,7 +480,7 @@ def load_metadata(run_dir: Path) -> dict:
     return data  # type: ignore[return-value]
 
 
-CANDIDATE_KEYS = ("candidates", "carried", "decided", "suppressed", "uncovered", "resolved_prior_leads", "unlinked_prior", "changed_prior", "merged", "prior_leads", "agents_seen")
+CANDIDATE_KEYS = ("candidates", "carried", "decided", "suppressed", "uncovered", "resolved_prior_leads", "unlinked_prior", "changed_prior", "accepted_prior", "merged", "prior_leads", "agents_seen")
 
 
 def load_candidates(run_dir: Path) -> dict:
@@ -532,3 +533,27 @@ def load_replacements(run_dir: Path) -> list:
 
 def save_replacements(run_dir: Path, items: list) -> None:
     write_json(run_file(run_dir, REPLACEMENTS_FILE), items)
+
+
+def load_dispositions(run_dir: Path) -> list:
+    path = run_file(run_dir, DISPOSITIONS_FILE)
+    if not path.exists():
+        return []
+    data = read_json(path)
+    if not isinstance(data, list):
+        die(f"{DISPOSITIONS_FILE}: must be an array")
+    return data
+
+
+def save_dispositions(run_dir: Path, items: list) -> None:
+    write_json(run_file(run_dir, DISPOSITIONS_FILE), items)
+
+
+def accepted_dispositions(items: list) -> dict[str, dict]:
+    """The fingerprints the owner accepted and has not withdrawn: the log is
+    append-only and the latest entry for a fingerprint wins (E39)."""
+    latest: dict[str, dict] = {}
+    for d in items:
+        if isinstance(d, dict) and isinstance(d.get("fingerprint"), str):
+            latest[d["fingerprint"]] = d
+    return {fp: d for fp, d in latest.items() if d.get("kind") == "accepted"}

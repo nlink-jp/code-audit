@@ -154,7 +154,7 @@
         "priority": { "type": "integer", "minimum": 1 },
         "prior_status": {
           "type": "string",
-          "enum": ["none", "new", "prior_confirmed_same_source", "prior_confirmed_changed_source", "prior_needs_validation", "prior_needs_validation_changed_source", "prior_deferred", "prior_blocked", "prior_out_of_scope", "prior_covered_same_source", "prior_covered_changed_source", "prior_rejected_claim_changed"]
+          "enum": ["none", "new", "prior_confirmed_same_source", "prior_confirmed_changed_source", "prior_needs_validation", "prior_needs_validation_changed_source", "prior_accepted_same_source", "prior_accepted_changed_source", "prior_deferred", "prior_blocked", "prior_out_of_scope", "prior_covered_same_source", "prior_covered_changed_source", "prior_rejected_claim_changed"]
         },
         "source_digests": { "type": "object" },
         "attempts": {
@@ -218,7 +218,7 @@
             "required": ["kind", "text"],
             "additionalProperties": false,
             "properties": {
-              "kind": { "type": "string", "enum": ["out_of_scope", "hardening", "lead"] },
+              "kind": { "type": "string", "enum": ["out_of_scope", "hardening", "lead", "documentation"] },
               "text": { "type": "string", "minLength": 1 },
               "coverage_id": { "type": "string" }
             }
@@ -310,6 +310,8 @@
         "description": { "type": "string", "minLength": 1 },
         "root_cause": { "type": "string", "minLength": 1 },
         "intended_behavior": { "type": "string", "minLength": 1 },
+        "path_actor": { "type": "string", "enum": ["unasked", "operator_composed"] },
+        "specified_in": { "type": "string", "minLength": 1 },
         "trace": { "type": "array", "minItems": 1, "items": { "type": "object" } },
         "evidence": { "type": "array", "minItems": 1, "items": { "type": "object" } },
         "conditions": {
@@ -431,13 +433,25 @@
         "carried_from": { "type": "string" }
       }
     },
+    "disposition": {
+      "type": "object",
+      "required": ["fingerprint", "kind", "record", "reason", "date"],
+      "additionalProperties": false,
+      "properties": {
+        "fingerprint": { "type": "string", "pattern": "^(?=.*[A-Za-z0-9])[A-Za-z0-9.][A-Za-z0-9._:/@+-]*$" },
+        "kind": { "type": "string", "enum": ["accepted", "withdrawn"] },
+        "record": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+      }
+    },
     "note": {
       "type": "object",
       "required": ["agent_id", "kind", "text"],
       "additionalProperties": false,
       "properties": {
         "agent_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
-        "kind": { "type": "string", "enum": ["out_of_scope", "hardening", "lead"] },
+        "kind": { "type": "string", "enum": ["out_of_scope", "hardening", "lead", "documentation"] },
         "text": { "type": "string", "minLength": 1 },
         "coverage_id": { "type": "string" }
       }

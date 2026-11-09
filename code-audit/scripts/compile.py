@@ -41,6 +41,9 @@ L = {
         "th_sev": "深刻度", "th_title": "題名", "th_boundary": "境界", "th_kind": "根拠種別", "th_observed": "観測された結果",
         "kind_source": "source（読解のみ）", "kind_test": "existing_test（{log}）",
         "fingerprint": "fingerprint", "description": "説明", "root_cause": "根本原因", "intended": "意図された振る舞い",
+        "actor": "成立に要る行為", "actor_unasked": "unasked（聞かずに走る経路: 操作者の行為なしに下位の主体が到達する）", "actor_operator": "operator_composed（操作者が自分で組む経路）", "specified": "動作を決めた記録", "specified_none": "なし（記録は見つからなかった）",
+        "disposition": "所有者の処置", "disposition_line": "accepted — {record}（{date}）: {reason}",
+        "accepted_prior": "所有者が受け入れた前回の所見（記録あり。引用元が変わらない限り再検証も再報告もしない）", "accepted_prior_changed": "引用元が変わった", "accepted_prior_same": "引用元は不変",
         "trace": "経路", "evidence": "根拠", "conditions": "条件", "evidence_kind": "根拠種別", "observed": "観測された結果",
         "severity": "深刻度", "likelihood": "起こりやすさ", "impact": "影響", "overall": "総合", "confidence": "確信度",
         "remediation": "修正", "strategy": "方針", "code_changes": "修正案", "coverage_ids": "網羅単位",
@@ -48,7 +51,7 @@ L = {
         "nv_intro": "深刻度は付けません。各項目は未解決の事実と、それを解く安全な手順です。詳細は NEEDS-VALIDATION.ja.md。",
         "th_blockers": "未解決の事実", "th_local": "手元での確認", "th_deploy": "配備側で観測する確認", "claimed": "主張された根本原因", "blockers": "未解決の事実", "plan": "確認の手順",
         "local": "手元", "deployment": "配備側",
-        "notes": "覚え書き", "hardening": "強化の提案（所見ではない）", "out_of_scope": "範囲外の観察", "lead": "次の実行への手がかり（判定なし。次回の `seed --prior` が批評者に渡す）", "prior_leads": "前回の実行から渡された手がかり（この実行の批評者が見た）",
+        "notes": "覚え書き", "hardening": "強化の提案（所見ではない）", "out_of_scope": "範囲外の観察", "documentation": "文書の所在（仕様として決まっているが、操作者の読む場所に書かれていない）", "lead": "次の実行への手がかり（判定なし。次回の `seed --prior` が批評者に渡す）", "prior_leads": "前回の実行から渡された手がかり（この実行の批評者が見た）",
         "coverage": "網羅の要約", "th_status": "状態", "th_count": "件数", "deferred_units": "先送り・範囲外の単位と理由", "uncovered": "次の波に回すべき未割当の面", "unverified": "検証に至らなかった候補（判定なし・深刻度なし）", "undecided": "台帳の判定が無いレコード（所見として報告しない）", "unlinked_prior": "今回の単位に結び付かない前回のレコード（判定なし）", "changed_prior": "引用元が変わったため持ち越さず再度狩った前回のレコード（今回の判定は上の表）",
         "rejected": "反証された候補", "rejected_line": "反証された候補は所見ではありません。次回の再報告を抑えるために fingerprint だけを記します: {fps}",
         "merged": "同根として統合した候補", "merged_line": "次の候補は別の fingerprint と根本原因を共有すると判断し、統合先で 1 回だけ検証しました（統合先の判定が上の表にあります）。",
@@ -71,6 +74,9 @@ L = {
         "th_sev": "Severity", "th_title": "Title", "th_boundary": "Boundary", "th_kind": "Evidence kind", "th_observed": "Observed result",
         "kind_source": "source (reading only)", "kind_test": "existing_test ({log})",
         "fingerprint": "fingerprint", "description": "Description", "root_cause": "Root cause", "intended": "Intended behaviour",
+        "actor": "Act needed", "actor_unasked": "unasked (the path runs with no act of the operator's; a lower-trust principal reaches it)", "actor_operator": "operator_composed (the operator composes the path themselves)", "specified": "Record deciding the behaviour", "specified_none": "none found",
+        "disposition": "Owner's disposition", "disposition_line": "accepted — {record} ({date}): {reason}",
+        "accepted_prior": "Prior findings the owner accepted (with a record; neither re-verified nor re-reported while their sources are unchanged)", "accepted_prior_changed": "sources changed", "accepted_prior_same": "sources unchanged",
         "trace": "Trace", "evidence": "Evidence", "conditions": "Conditions", "evidence_kind": "Evidence kind", "observed": "Observed result",
         "severity": "Severity", "likelihood": "likelihood", "impact": "impact", "overall": "overall", "confidence": "Confidence",
         "remediation": "Remediation", "strategy": "strategy", "code_changes": "proposed changes", "coverage_ids": "coverage units",
@@ -78,7 +84,7 @@ L = {
         "nv_intro": "No severity is assigned. Each lead names the unresolved fact and a safe step to settle it. Details in NEEDS-VALIDATION.md.",
         "th_blockers": "Unresolved facts", "th_local": "Local check", "th_deploy": "Owner-observed check", "claimed": "Claimed root cause", "blockers": "Unresolved facts", "plan": "Validation plan",
         "local": "local", "deployment": "deployment",
-        "notes": "Notes", "hardening": "Hardening notes (not findings)", "out_of_scope": "Out-of-scope observations", "lead": "Leads for the next run (no verdict; the next run's `seed --prior` hands them to its critic)", "prior_leads": "Leads handed over from prior runs (seen by this run's critic)",
+        "notes": "Notes", "hardening": "Hardening notes (not findings)", "out_of_scope": "Out-of-scope observations", "documentation": "Documentation notes (specified behaviour not stated where the operator reads)", "lead": "Leads for the next run (no verdict; the next run's `seed --prior` hands them to its critic)", "prior_leads": "Leads handed over from prior runs (seen by this run's critic)",
         "coverage": "Coverage summary", "th_status": "Status", "th_count": "Count", "deferred_units": "Deferred and out-of-scope units with reasons", "uncovered": "Unassigned surfaces for a later wave", "unverified": "Candidates not verified (no verdict, no severity)", "undecided": "Records without a ledger decision (not reported as findings)", "unlinked_prior": "Prior records that no current unit covers (no verdict)", "changed_prior": "Prior records whose cited sources changed (re-hunted, not carried; this run's verdicts are above)",
         "rejected": "Rejected candidates", "rejected_line": "Rejected candidates are not findings. Only their fingerprints are listed so the next run does not repeat the claim: {fps}",
         "merged": "Candidates merged as duplicates", "merged_line": "These candidates were judged to share a root cause with another fingerprint and were verified once under it (the kept fingerprint's verdict is in the tables above).",
@@ -131,8 +137,9 @@ def kind_label(rec: dict, t: dict) -> str:
     return t["kind_source"]
 
 
-def render_report(lang: str, meta: dict, units: list, findings: list, candidates: dict, notes: list, replacements: list | None = None) -> str:
+def render_report(lang: str, meta: dict, units: list, findings: list, candidates: dict, notes: list, replacements: list | None = None, dispositions: list | None = None) -> str:
     replacements = replacements or []
+    accepted = c.accepted_dispositions(dispositions or [])
     t = L[lang]
     uid = {u["coverage_id"]: u for u in units}
     decided = {d["fingerprint"]: d["verdict"] for d in candidates.get("decided", [])}
@@ -218,6 +225,18 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
             out.append("")
             out.append(f"**{t['intended']}.** {plain(r['intended_behavior'])}")
             out.append("")
+            if r.get("path_actor") or r.get("specified_in"):
+                # E37: records of this version say whose act the path needs
+                # and which record decided the behaviour.
+                actor = t["actor_operator"] if r.get("path_actor") == "operator_composed" else t["actor_unasked"]
+                spec = r.get("specified_in", "")
+                spec_text = t["specified_none"] if str(spec).strip().lower() in ("", "none") else plain(spec)
+                out.append(f"**{t['actor']}.** {actor}; {t['specified']}: {spec_text}")
+                out.append("")
+            if r["fingerprint"] in accepted:
+                d = accepted[r["fingerprint"]]
+                out.append(f"**{t['disposition']}.** " + t["disposition_line"].format(record=plain(d["record"]), date=plain(d["date"]), reason=plain(d["reason"])))
+                out.append("")
             out.append(f"**{t['trace']}.**")
             out.append("")
             for i, s in enumerate(r["trace"], start=1):
@@ -262,8 +281,9 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
     hard = [n for n in notes if n.get("kind") == "hardening"]
     oos = [n for n in notes if n.get("kind") == "out_of_scope"]
     leads = [n for n in notes if n.get("kind") == "lead"]
+    docs = [n for n in notes if n.get("kind") == "documentation"]
     prior_leads = candidates.get("prior_leads", [])
-    if hard or oos or leads or prior_leads:
+    if hard or oos or leads or prior_leads or docs:
         out.append(f"## {t['notes']}")
         out.append("")
         if leads:
@@ -277,6 +297,12 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
             out.append("")
             for n in prior_leads:
                 out.append(f"- ({plain(str(n.get('prior_run', '')))}) {plain(n['text'])}")
+            out.append("")
+        if docs:
+            out.append(f"### {t['documentation']}")
+            out.append("")
+            for n in docs:
+                out.append(f"- {plain(n['text'])}")
             out.append("")
         if hard:
             out.append(f"### {t['hardening']}")
@@ -312,6 +338,13 @@ def render_report(lang: str, meta: dict, units: list, findings: list, candidates
         out.append("")
         for r in candidates["changed_prior"]:
             out.append(f"- `{code(r['fingerprint'])}` ({plain(r['prior_run'])}, {plain(r['verdict'])}): {plain(r.get('title', ''))}")
+        out.append("")
+    if candidates.get("accepted_prior"):
+        out.append(f"### {t['accepted_prior']}")
+        out.append("")
+        for r in candidates["accepted_prior"]:
+            state = t["accepted_prior_changed"] if r.get("source_changed") else t["accepted_prior_same"]
+            out.append(f"- `{code(r['fingerprint'])}` ({plain(r['prior_run'])}, {plain(r['record'])}, {plain(r['date'])}; {state}): {plain(r.get('title', ''))}")
         out.append("")
     if candidates.get("unlinked_prior"):
         out.append(f"### {t['unlinked_prior']}")
@@ -414,9 +447,10 @@ def main(argv: list[str] | None = None) -> None:
     candidates = c.load_candidates(run_dir)
     notes = c.load_notes(run_dir)
     replacements = c.load_replacements(run_dir)
+    dispositions = c.load_dispositions(run_dir)
     written = []
     for lang, name, nv_name in (("ja", "REPORT.ja.md", "NEEDS-VALIDATION.ja.md"), ("en", "REPORT.md", "NEEDS-VALIDATION.md")):
-        (run_dir / name).write_text(render_report(lang, meta, units, findings, candidates, notes, replacements), encoding="utf-8")
+        (run_dir / name).write_text(render_report(lang, meta, units, findings, candidates, notes, replacements, dispositions), encoding="utf-8")
         (run_dir / nv_name).write_text(render_needs_validation(lang, meta, decided_only(findings, candidates)), encoding="utf-8")
         written += [name, nv_name]
     reported = decided_only(findings, candidates)

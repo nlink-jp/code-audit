@@ -155,11 +155,39 @@ approving. Covered when every string is made inert at the UI's ingress and
 transforms downstream are held to their own output.
 
 ## Shared toolchain caches from a sandboxed lane
-Source: security.md#Point toolchain caches inside the sandbox at the session scratch — a shared cache is a poisoning route from an unattended lane
+Source: security.md#Point toolchain caches inside the sandbox at the session scratch — a shared cache is a poisoning route from an unattended lane, security.md#What a privileged build trusts must be outside every allow — a Seatbelt denial by name does not survive renaming a writable ancestor
 
 Build and test caches shared between an unattended lane and the operator's
-own builds are a poisoning route. Covered when the unattended lane's
-caches point at its own scratch, apart from the approved lane's.
+own builds are a poisoning route, and the first remedy measured was not
+enough: a cache beside the unattended lane's scratch, split off by an
+environment variable or denied by name under a directory the lane can write,
+is still reachable — the lane renames the writable ancestor, writes, renames
+back, and file tools write there unasked. Covered when what an approved
+build trusts sits where no lane's allow and no file tool's root reaches,
+granted only in the owning session's profile; a denial by name is a second
+line, not the control.
+
+## Approval dialog shows less than the call
+Source: security.md#An approval prompt must carry the whole call — and no layout can prove which row is which
+Refines: classes/generic.md#Access control
+
+The string the human approves is the control. Is it built by the helper that
+abbreviates an event line — per-argument clipping, a joined string under one
+limit, `%v` formatting — so that a long command puts its effect past what the
+operator sees? Covered when the gate renders every argument, keeps the end of
+each value, puts short values before long ones, marks what it omits, and
+promises no more than that: no layout can prove which row is which.
+
+## Lane-writable directory reused on resume
+Source: security.md#A directory a sandboxed lane can write and a resume reuses must be refused if it has become a link
+Refines: classes/generic.md#Resource and file handling
+
+A work, scratch or cache directory a sandboxed lane can write and a later
+start reuses (`MkdirAll` succeeds on a link to a directory) becomes the next
+profile's grant to wherever the link leads, and an unsandboxed startup probe
+writes through it. Covered when such a directory is checked with `Lstat`
+after creation and refused unless it is a real directory, and the runtime's
+own probes use a fresh random name with exclusive creates.
 
 ## Unattended degradation
 Source: security.md#With no human present, degrade "ask the human" to "deny with the reason" — do not kill the ladder, security.md#A human confirmation step is not a durable boundary for granting standing permissions

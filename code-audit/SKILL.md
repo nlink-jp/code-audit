@@ -81,7 +81,7 @@ Decide from the user's request before creating anything:
   and the run metadata; never take a value from a summary of earlier turns.
 - Owned files, each written by one script only:
   run metadata and `checks/<id>.log` by `run.py`; `coverage-ledger.json`, `candidates.json` and `architecture.md` by `ledger.py`;
-  `findings.json` and `replacements.json` by `findings.py`; `notes.json` by `ledger.py record` and `findings.py note`.
+  `findings.json`, `replacements.json` and `dispositions.json` by `findings.py`; `notes.json` by `ledger.py record` and `findings.py note`.
 - Agent ids: `recon-a`..`recon-d`, `hunter-1`, `critic-1`, `verifier-1`,
   `reverifier-1` ... (`^[a-z0-9][a-z0-9_-]{0,63}$`). An id is used once per
   run; `ledger.py assign` and `decide` refuse a used one. **Count every
@@ -152,7 +152,13 @@ claims with unchanged sources as **suppressed** (the same claim is not
 reported again, but the unit is still hunted), and lists prior `confirmed`
 and `needs_validation` records whose sources changed as **changed_prior**:
 they are not carried — the unit is hunted afresh with its `prior_status` as
-the pointer — and the report names them beside this run's verdicts. The
+the pointer — and the report names them beside this run's verdicts. A prior
+`confirmed` record the owner **accepted** after triage (`findings.py accept`
+in that run, naming the ADR or document that keeps the behaviour) is listed
+as **accepted_prior**: with unchanged sources it is neither re-verified nor
+re-reported (`ledger.py record` drops the same claim as suppressed); with
+changed sources the unit is hunted with `prior_accepted_changed_source` as
+its pointer, and the report says the acceptance predates the change. The
 same prior given twice counts once; priors are read oldest first, so the
 latest run's verdict wins where they disagree.
 
@@ -284,12 +290,16 @@ Give `--tokens-per-invocation` the average input size you measured in
 reconnaissance (prompt plus files read), when known. Show the user: the
 profile, `hunters` (planned units grouped `units_per_hunter` at a time),
 `critics`, `verification_stages`, `expected_candidates`, `verifiers`,
-`candidates_per_unit` (the measured rate of the profile: quick finds more,
-standard follows a prior run), `reruns` (the re-asks a run of this size
-needs, about one return in seven),
-`total_invocations`, `tokens_estimate`, and whether it fits the recorded
-budget. Then **ask with AskUserQuestion**: approve this estimate,
-approve with a lower budget, or stop here. Record the answer:
+`fresh_units` and `prior_units` with `candidates_per_unit` (the measured
+rates: a unit no prior run hunted yields about twice the candidates of one
+that follows a prior, whatever the profile — the first audit of an agent
+runtime ran out of a budget estimated at the lower rate), `reruns` (the
+re-asks a run of this size needs, about one return in seven),
+`total_invocations`, `tokens_estimate`, whether it fits the recorded budget
+and, when it does not, the `shortfall`. Say plainly that a budget kept below
+`total_invocations` ends the run `incomplete` with units unverified. Then
+**ask with AskUserQuestion**: approve this estimate, approve with a lower
+budget, or stop here. Record the answer:
 
 ```
 python3 SKILL_DIR/scripts/run.py approve RUN [--budget N]
@@ -400,7 +410,12 @@ source changed: read that change first, the fix may be partial;
 whether the current source settles it; `prior_needs_validation_changed_source`
 — an open lead sat here and its source changed (the record is listed as a
 changed prior, not re-verified): read the change and say whether it settles
-or re-opens the lead; `prior_rejected_claim_changed` — a
+or re-opens the lead; `prior_accepted_same_source` — the owner accepted a
+confirmed finding here with a record and nothing changed: do not re-claim
+it, look for a second cause; `prior_accepted_changed_source` — the owner
+accepted a finding here and its source changed since: read the change and
+say whether it still matches what the record accepted (a new claim only if
+it does not); `prior_rejected_claim_changed` — a
 rejected claim's source changed: the rejection may no longer hold;
 `prior_deferred` — never actually hunted before: treat as new;
 `prior_blocked` — the last run stopped on an unresolved fact (or left a
@@ -550,7 +565,20 @@ launch a verifier that has never seen the hunter's prompt
    settle it — name it in `blockers`, with a `validation_plan` (`local`:
    what a maintainer can check here; `deployment`: what only the owner of the
    deployment knows) and no severity. `rejected` when a preventing layer or a
-   false premise is shown, with `reason`.
+   false premise is shown, with `reason`. Before scoring a `confirmed` record
+   answer two more questions in it (rule 3): `path_actor` — does the path run
+   `unasked` (a lower-trust principal reaches the sink with no act of the
+   operator's) or is it `operator_composed` (the operator pipes, types or
+   flags it themselves, as `curl … | bash` is composed)? — and
+   `specified_in` — which record of the target (an ADR, a design document, a
+   reference page, cited as the target names it) decided this behaviour, or
+   `none` after looking where the target keeps its decisions. An
+   `operator_composed` path whose behaviour a record decided is **not a
+   finding**: return `rejected` with a `reason` naming the record, and a
+   `documentation` note when the decision is not stated where the operator
+   reads (`findings.py add` refuses the `confirmed` form). An `unasked` path
+   stays a finding whatever the record says; cite it so the owner sees which
+   guarantee broke.
 5. The output contract: exactly one JSON object
    `{"agent_id", "verdict", "record", "layers_examined": [{"layer", "file", "line", "prevents", "why"}], "notes": [{"kind", "text"}]}`
    where `record` is the full finding in the shape of the verdict — the
@@ -561,7 +589,8 @@ launch a verifier that has never seen the hunter's prompt
    `required_fields` lists for that verdict** (a `rejected` record still
    carries `description` and `evidence`) **and for its entries**: a
    `trace_entry` carries `kind`, `file`, `line`, `scope`, `description`, an
-   `evidence_entry` `file`, `line`, `description` — name them from the brief,
+   `evidence_entry` `file`, `line`, `description`, a `finding_confirmed`
+   also `path_actor` and `specified_in` — name them from the brief,
    never from memory (six verifiers of the fourth E2E run dropped `kind` and
    `scope` when the parent named three fields). A `rejected` or `needs_validation` record names the cause as
    `claimed_root_cause` and carries no severity, confidence, evidence kind,
@@ -573,7 +602,9 @@ launch a verifier that has never seen the hunter's prompt
    prose.
 6. Negative space: do not widen the claim or merge another weakness into
    it — a different root cause is a `hardening`, `out_of_scope` or `lead`
-   note, not a new candidate; do not soften a verdict for lack of time — say
+   note, not a new candidate; do not score a documented behaviour the
+   operator composes — it is `rejected` with the record named, and the gap
+   in what the operator reads is a `documentation` note; do not soften a verdict for lack of time — say
    `needs_validation` with the exact blocker; do not infer runtime behaviour
    you did not see — source-only evidence stays `source`; do not spell a
    personal identifier or a local path — describe it at `file:line`
@@ -697,6 +728,22 @@ python3 SKILL_DIR/scripts/compile.py RUN
    unavailable, if any; and, for a partial run, why. Quote verdicts and
    severities as the records state them. Never add a finding in prose that
    has no record, and never restate a record's verdict differently.
+4. **After the owner's triage** (any time later, at the user's word): a
+   confirmed finding the owner keeps as it stands — with a record that says
+   so, an ADR or a reference page — is logged in the run, never edited out
+   of it:
+
+```
+python3 SKILL_DIR/scripts/findings.py accept RUN --fingerprint <fp> --record "ADR-0113" --reason "<why it is accepted>"
+python3 SKILL_DIR/scripts/compile.py RUN
+```
+
+   The report then shows the disposition under the finding, and the next
+   run's `seed --prior` lists the record as `accepted_prior` instead of
+   re-verifying or re-reporting it while its sources are unchanged.
+   `--withdraw` logs a reversal; `dispositions.json` is append-only and the
+   latest entry wins. A finding fixed in the code needs no entry: the
+   changed sources already keep it from being carried.
 
 ## What the parent never does
 

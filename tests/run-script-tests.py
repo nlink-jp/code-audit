@@ -578,8 +578,8 @@ class LedgerTests(RunFixture):
     def test_assign_counts_the_hunter_and_keeps_the_reserve_with_in_progress_units(self) -> None:
         self.seed(approve=False)
         u1, u2 = self.unit_ids()
-        # standard: 3 critics + 2 stages × max(1, ceil(hunting × 0.3)) = 5 reserved; budget 6 fits one hunter only
-        self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "6"))
+        # standard: 3 critics + 2 stages × ceil(2 fresh units × 0.6) = 7 reserved; budget 8 fits one hunter only
+        self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "8"))
         out = self.ok(run("ledger.py", "assign", str(self.run_dir), "--agent", "hunter-1", u1))
         self.assertEqual(out["invocations"]["hunter"], 1)
         meta = json.loads((self.run_dir / "run-metadata.json").read_text(encoding="utf-8"))
@@ -884,6 +884,8 @@ class LedgerTests(RunFixture):
         self.assertIn("reason", vb["required_fields"]["finding_rejected"])
         self.assertIn("evidence", vb["required_fields"]["finding_rejected"])
         self.assertIn("blockers", vb["required_fields"]["finding_needs_validation"])
+        # E37: the two questions a new confirmed record answers are in the brief, not retyped
+        self.assertEqual(vb["required_fields"]["finding_confirmed"][-2:], ["path_actor", "specified_in"])
         self.assertIn("inside TARGET", vb["file_rule"])
         self.assertEqual([u["coverage_id"] for u in vb["units"]], [u1])
         log = next(x for x in vb["check_logs"] if x["command_id"] == "unit-tests")
@@ -1051,14 +1053,19 @@ class LedgerTests(RunFixture):
         est = self.ok(run("ledger.py", "estimate", str(self.run_dir), "--tokens-per-invocation", "50000"))
         # E5 (E2E 2026-11-08): two planned units are one hunter; re-asks are budgeted
         self.assertEqual((est["hunters"], est["units_per_hunter"], est["critics"], est["verification_stages"]), (1, 3, 3, 2))
-        # E26 (three E2E runs): per-profile candidate rate and the measured re-ask rate
-        self.assertEqual((est["candidates_per_unit"], est["rerun_rate"]), (0.30, 0.15))
+        # E26 / E38 (five E2E runs): the candidate rate follows whether the unit
+        # was hunted before, not the profile; both units are fresh here
+        self.assertEqual((est["candidates_per_unit"], est["rerun_rate"]), ({"fresh": 0.60, "prior": 0.30}, 0.15))
+        self.assertEqual((est["fresh_units"], est["prior_units"], est["expected_candidates"]), (2, 0, 2))
         self.assertEqual(est["total_invocations"], est["spent"] + est["hunters"] + est["critics"] + est["verifiers"] + est["reruns"])
+        self.assertEqual(est["shortfall"], 0)
         self.assertGreaterEqual(est["reruns"], 1)
         self.assertEqual(est["tokens_estimate"], est["total_invocations"] * 50000)
         self.assertTrue(est["fits_budget"])
         self.ok(run("run.py", "approve", str(self.run_dir), "--budget", "2"))
-        self.assertFalse(self.ok(run("ledger.py", "estimate", str(self.run_dir)))["fits_budget"])
+        est = self.ok(run("ledger.py", "estimate", str(self.run_dir)))
+        self.assertFalse(est["fits_budget"])
+        self.assertEqual(est["shortfall"], est["total_invocations"] - 2)  # E38: the number to ask for
         out = self.ok(run("ledger.py", "defer", str(self.run_dir), "--reason", "budget_cannot_reserve_critics_and_validation", "--all-planned"))
         self.assertEqual(len(out["deferred"]), 2)
         self.assertTrue(all(u["status"] == "deferred" and u["unresolved"] for u in self.ledger()))
@@ -1472,6 +1479,63 @@ class FindingsTests(RunFixture):
         self.assertIn("| records replaced after re-verification | 1 (1 weakening the verdict, severity, confidence or evidence kind)", en)
 
 
+    def test_new_confirmed_record_answers_whose_act_and_whose_decision(self) -> None:
+        # E37 (gem-agent audit 2026-11-09): a high was the documented behaviour of
+        # a path the operator composes. Rule 3 is enforced where a record enters.
+        self.hunt()
+        rec = self.candidate_record(0)
+        bare = {k: v for k, v in rec.items() if k not in ("path_actor", "specified_in")}
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(bare, "bare.json"))), "record.path_actor: a new confirmed record answers it")
+        spec = {**rec, "path_actor": "operator_composed", "specified_in": "ADR-0055 §3"}
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json(spec, "spec.json"))), "not a finding (references/severity.md rule 3)")
+        # the same decision on an unasked path is still a finding, and an operator-composed path with no record too
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json({**rec, "path_actor": "unasked", "specified_in": "ADR-0055 §3"}, "unasked.json"))))
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", rec["fingerprint"], "--verdict", "confirmed"))
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json({**rec, "path_actor": "operator_composed", "specified_in": "none"}, "composed.json")), "--replace", "--by", "reverifier-1"))
+        self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json({**rec, "path_actor": "typed", "specified_in": "none"}, "bad.json")), "--replace", "--by", "reverifier-2"), "path_actor")
+        # a documentation note is where the gap in what the operator reads goes
+        before = len(json.loads((self.run_dir / "notes.json").read_text(encoding="utf-8")))
+        out = self.ok(run("findings.py", "note", str(self.run_dir), "--agent", "verifier-7", "--kind", "documentation", "--text", "the decision is in ADR-0055 but not in the interface reference"))
+        self.assertEqual(out["notes"], before + 1)
+        self.ok(run("compile.py", str(self.run_dir)))
+        en = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
+        self.assertIn("Documentation notes (specified behaviour not stated where the operator reads)", en)
+        self.assertIn("**Act needed.** operator_composed", en)
+
+    def test_accept_logs_the_owners_disposition(self) -> None:
+        # E39 (gem-agent audit): three medium findings were accepted with an ADR.
+        # The acceptance is a fact of the books, logged and never edited in.
+        self.hunt()
+        fp = "app/files.py:read_user_file:path-traversal"
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(0), "r0.json"))))
+        self.refused(run("findings.py", "accept", str(self.run_dir), "--fingerprint", fp, "--record", "ADR-0113", "--reason", "x"), "never decided")
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", "confirmed"))
+        self.refused(run("findings.py", "accept", str(self.run_dir), "--fingerprint", "app/files.py:nothing:here", "--record", "ADR-0113", "--reason", "x"), "only a record of this run")
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(1), "nv.json"))))
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", "app/files.py:read_user_file:symlink-escape", "--verdict", "needs_validation"))
+        self.refused(run("findings.py", "accept", str(self.run_dir), "--fingerprint", "app/files.py:read_user_file:symlink-escape", "--record", "ADR-0113", "--reason", "x"), "only a confirmed finding is accepted")
+        self.refused(run("findings.py", "accept", str(self.run_dir), "--fingerprint", fp, "--record", "ADR-0113", "--reason", "x", "--date", "9 Nov"), "disposition.date")
+        import getpass
+        login = getpass.getuser()
+        if len(login) >= 3:
+            self.refused(run("findings.py", "accept", str(self.run_dir), "--fingerprint", fp, "--record", "ADR-0113", "--reason", f"decided by {login}"), "login")
+        out = self.ok(run("findings.py", "accept", str(self.run_dir), "--fingerprint", fp, "--record", "ADR-0113", "--reason", "the read-only child needs no hook", "--date", "2026-11-09"))
+        self.assertEqual((out["kind"], out["accepted"]), ("accepted", [fp]))
+        self.refused(run("findings.py", "accept", str(self.run_dir), "--fingerprint", fp, "--record", "ADR-0114", "--reason", "y"), "already accepted (ADR-0113, 2026-11-09)")
+        self.ok(run("compile.py", str(self.run_dir)))
+        en = (self.run_dir / "REPORT.md").read_text(encoding="utf-8")
+        self.assertIn("**Owner's disposition.** accepted — ADR-0113 (2026-11-09): the read-only child needs no hook", en)
+        self.assertIn("所有者の処置", (self.run_dir / "REPORT.ja.md").read_text(encoding="utf-8"))
+        self.refused(run("findings.py", "accept", str(self.run_dir), "--fingerprint", "app/files.py:read_user_file:symlink-escape", "--record", "ADR-0113", "--reason", "x", "--withdraw"), "only a confirmed finding")
+        out = self.ok(run("findings.py", "accept", str(self.run_dir), "--fingerprint", fp, "--record", "ADR-0115", "--reason", "reversed", "--withdraw"))
+        self.assertEqual((out["kind"], out["accepted"]), ("withdrawn", []))
+        self.refused(run("findings.py", "accept", str(self.run_dir), "--fingerprint", fp, "--record", "ADR-0115", "--reason", "again", "--withdraw"), "nothing to withdraw")
+        log = json.loads((self.run_dir / "dispositions.json").read_text(encoding="utf-8"))
+        self.assertEqual([d["kind"] for d in log], ["accepted", "withdrawn"])  # append-only
+        self.ok(run("compile.py", str(self.run_dir)))
+        self.assertNotIn("Owner's disposition", (self.run_dir / "REPORT.md").read_text(encoding="utf-8"))
+
+
 class PriorRunTests(RunFixture):
     def complete_run(self) -> None:
         self.hunt()
@@ -1684,6 +1748,77 @@ class PriorRunTests(RunFixture):
         self.assertNotIn("/etc/hosts", (run2 / "candidates.json").read_text(encoding="utf-8"))
 
 
+    def accepted_run(self) -> str:
+        """A run with one confirmed, accepted finding on the Resource unit."""
+        self.hunt()
+        fp = "app/files.py:read_user_file:path-traversal"
+        self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json(self.candidate_record(0), "r0.json"))))
+        self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", fp, "--verdict", "confirmed"))
+        self.ok(run("findings.py", "accept", str(self.run_dir), "--fingerprint", fp, "--record", "ADR-0113", "--reason", "kept", "--date", "2026-11-09"))
+        return fp
+
+    def test_accepted_prior_is_neither_carried_nor_reported_while_unchanged(self) -> None:
+        # E39 (gem-agent audit): an owner-accepted finding would otherwise be
+        # re-verified every run and re-reported as if new.
+        fp = self.accepted_run()
+        run2 = self.tmpdir / "out" / "run-2"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
+        out = self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.assertEqual((out["carried"], out["accepted_prior"]), ([], [fp]))
+        units = {u["attack_class"]: u for u in json.loads((run2 / "coverage-ledger.json").read_text(encoding="utf-8"))}
+        self.assertEqual(units["Resource and file handling"]["prior_status"], "prior_accepted_same_source")
+        cands = json.loads((run2 / "candidates.json").read_text(encoding="utf-8"))
+        self.assertEqual((cands["carried"], cands["changed_prior"]), ([], []))
+        self.assertEqual((cands["accepted_prior"][0]["record"], cands["accepted_prior"][0]["source_changed"]), ("ADR-0113", False))
+        # the critic sees it; a hunter that claims the same fingerprint is not queued again
+        self.ok(run("run.py", "approve", str(run2), "--budget", "40"))
+        self.architecture(run2)
+        cb = self.ok(run("ledger.py", "brief", str(run2), "critic"))
+        self.assertEqual(cb["accepted_prior"], [{"fingerprint": fp, "record": "ADR-0113", "source_changed": False}])
+        shutil.copy(FIXTURES / "commands.json", run2 / "commands.json")
+        self.ok(run("run.py", "exec", str(run2), "unit-tests", "--target", str(self.target)))
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(run2), "--agent", "hunter-1", u1, u2))
+        rec = self.ok(run("ledger.py", "record", str(run2), str(self.fill("hunter-result.json"))))
+        self.assertIn(fp, rec["suppressed_candidates"])
+        unit = next(u for u in json.loads((run2 / "coverage-ledger.json").read_text(encoding="utf-8")) if u["coverage_id"] == u1)
+        self.assertTrue(any("accepted by the owner" in n for n in unit.get("notes", [])), unit.get("notes"))
+        # the estimate counts both units as units with a prior (E38)
+        est = self.ok(run("ledger.py", "estimate", str(run2)))
+        self.assertEqual((est["fresh_units"], est["prior_units"]), (0, 0))  # hunting is over for both
+        self.ok(run("compile.py", str(run2)))
+        en = (run2 / "REPORT.md").read_text(encoding="utf-8")
+        self.assertIn("Prior findings the owner accepted", en)
+        self.assertIn("ADR-0113, 2026-11-09; sources unchanged", en)
+        self.ok(run("ledger.py", "validate", str(run2)))
+
+    def test_accepted_prior_with_changed_source_is_hunted_again(self) -> None:
+        fp = self.accepted_run()
+        path = self.target / "app" / "files.py"
+        path.write_text(path.read_text(encoding="utf-8") + "\n# touched\n", encoding="utf-8")
+        run2 = self.tmpdir / "out" / "run-2"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
+        out = self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.assertEqual((out["carried"], out["accepted_prior"]), ([], [fp]))
+        units = {u["attack_class"]: u for u in json.loads((run2 / "coverage-ledger.json").read_text(encoding="utf-8"))}
+        self.assertEqual(units["Resource and file handling"]["prior_status"], "prior_accepted_changed_source")
+        cands = json.loads((run2 / "candidates.json").read_text(encoding="utf-8"))
+        self.assertTrue(cands["accepted_prior"][0]["source_changed"])
+        est = self.ok(run("ledger.py", "estimate", str(run2)))
+        self.assertEqual((est["fresh_units"], est["prior_units"]), (0, 2))
+        self.ok(run("compile.py", str(run2)))
+        self.assertIn("sources changed", (run2 / "REPORT.md").read_text(encoding="utf-8"))
+
+    def test_prior_dispositions_are_input_and_invalid_ones_are_dropped(self) -> None:
+        fp = self.accepted_run()
+        (self.run_dir / "dispositions.json").write_text(json.dumps([{"fingerprint": fp, "kind": "accepted", "record": "ADR-0113", "reason": "kept", "date": "2026-11-09"}, {"fingerprint": fp, "kind": "bogus"}]), encoding="utf-8")
+        run2 = self.tmpdir / "out" / "run-2"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
+        out = self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.assertEqual(out["accepted_prior"], [fp])
+        self.assertTrue(any("disposition 1 dropped" in w for w in out["warnings"]), out["warnings"])
+
+
 class CompileTests(RunFixture):
     def reports(self) -> dict[str, str]:
         self.hunt()
@@ -1711,6 +1846,9 @@ class CompileTests(RunFixture):
             self.assertIn("Makefile#fetch", text)
         self.assertIn("Hardening notes (not findings)", en)
         self.assertIn("read_user_file could refuse absolute names", en)
+        self.assertIn("**Act needed.** unasked", en)  # E37
+        self.assertIn("Record deciding the behaviour: none found", en)
+        self.assertIn("成立に要る行為", ja)
         nv_en = reports["NEEDS-VALIDATION.md"]
         self.assertIn("Symlink inside base_dir may escape it", nv_en)
         self.assertIn("the owner checks who can write inside", nv_en)

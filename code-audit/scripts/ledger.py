@@ -405,7 +405,16 @@ def load_prior(path: Path) -> dict:
                 warnings.append(f"prior {path.name}: lead note {i} dropped (does not validate)")
                 continue
             leads.append(note)
-    return {"run_id": meta["run_id"], "name": path.resolve().name, "ledger": ledger, "findings": findings, "leads": leads, "profile": meta["profile"], "created": meta.get("created", ""), "warnings": warnings}
+    dispositions = []
+    disp_path = path / c.DISPOSITIONS_FILE
+    if disp_path.exists():
+        raw = c.read_json(disp_path)
+        for i, d in enumerate(raw if isinstance(raw, list) else []):
+            if not isinstance(d, dict) or c.validate_part(d, "disposition", f"prior.dispositions[{i}]") or c.forbidden_char_errors(d, f"prior.dispositions[{i}]"):
+                warnings.append(f"prior {path.name}: disposition {i} dropped (does not validate)")
+                continue
+            dispositions.append(d)
+    return {"run_id": meta["run_id"], "name": path.resolve().name, "ledger": ledger, "findings": findings, "leads": leads, "accepted": c.accepted_dispositions(dispositions), "profile": meta["profile"], "created": meta.get("created", ""), "warnings": warnings}
 
 
 def unit_triple(u: dict) -> tuple:
@@ -495,7 +504,7 @@ def cmd_seed(args: argparse.Namespace) -> None:
                     cu["prior_status"] = prior_status_from_unit(pu, cu["source_digests"])
         # A record-derived status outranks a unit-derived one, and among
         # records the strongest prior claim wins for the unit.
-        rank = {"prior_confirmed_changed_source": 6, "prior_confirmed_same_source": 5, "prior_needs_validation_changed_source": 4, "prior_needs_validation": 3, "prior_rejected_claim_changed": 2}
+        rank = {"prior_confirmed_changed_source": 7, "prior_confirmed_same_source": 6, "prior_needs_validation_changed_source": 5, "prior_needs_validation": 4, "prior_accepted_changed_source": 3, "prior_rejected_claim_changed": 2, "prior_accepted_same_source": 1}
         proposed: dict[str, str] = {}
 
         def propose(u: dict, status: str) -> None:
@@ -526,6 +535,16 @@ def cmd_seed(args: argparse.Namespace) -> None:
                 carried = dict(rec)
                 carried["carried_from"] = prior["run_id"]
                 carried["coverage_ids"] = sorted(linked_ids)  # this run's ids; the verifier's record carries them
+                if verdict == "confirmed" and fp in prior["accepted"]:
+                    # E39 (gem-agent audit): the owner accepted the finding with
+                    # a record (an ADR). Unchanged, it is neither re-verified nor
+                    # re-reported; changed, the unit is hunted with the
+                    # acceptance as its pointer and the record is listed.
+                    disp = prior["accepted"][fp]
+                    for u in linked:
+                        propose(u, "prior_accepted_same_source" if same else "prior_accepted_changed_source")
+                    candidates["accepted_prior"].append({"fingerprint": fp, "title": rec.get("title", ""), "prior_run": prior["run_id"], "record": disp["record"], "reason": disp["reason"], "date": disp["date"], "source_changed": not same, "units": [u["coverage_id"] for u in linked]})
+                    continue
                 if verdict == "confirmed":
                     for u in linked:
                         propose(u, "prior_confirmed_same_source" if same else "prior_confirmed_changed_source")
@@ -568,6 +587,7 @@ def cmd_seed(args: argparse.Namespace) -> None:
         "carried": [r["fingerprint"] for r in candidates["carried"]],
         "suppressed": [r["fingerprint"] for r in candidates["suppressed"]],
         "unlinked_prior": [r["fingerprint"] for r in candidates["unlinked_prior"]],
+        "accepted_prior": [r["fingerprint"] for r in candidates["accepted_prior"]],
         "prior_leads": len(candidates["prior_leads"]),
         "remapped_prior": remapped,
         "warnings": warnings,
@@ -765,6 +785,9 @@ def cmd_record(args: argparse.Namespace) -> None:
     claimed = {fp for ru in reported.values() for fp in ru["candidate_fingerprints"]}
     known = {r["fingerprint"] for key in ("candidates", "carried", "decided") for r in candidates.get(key, [])}
     suppressed_fps = {r["fingerprint"] for r in candidates.get("suppressed", [])}
+    # E39: a claim the owner accepted with a record, sources unchanged, is
+    # not queued again either; the report lists it under the acceptance.
+    accepted_fps = {r["fingerprint"] for r in candidates.get("accepted_prior", []) if not r.get("source_changed")}
     claimants = {fp: {cid for cid, ru in reported.items() if fp in ru["candidate_fingerprints"]} for fp in claimed}
     accepted: list[dict] = []
     duplicates: list[str] = []
@@ -788,9 +811,10 @@ def cmd_record(args: argparse.Namespace) -> None:
         if not claimants[rec["fingerprint"]] <= set(rec["coverage_ids"]):
             errors.append(f"{cb}.coverage_ids: must include every unit that lists this fingerprint: {sorted(claimants[rec['fingerprint']])}")
             continue
-        if rec["fingerprint"] in suppressed_fps:
-            # The same claim was rejected by a prior run and its sources are
-            # unchanged: it is not queued again. The unit keeps the note.
+        if rec["fingerprint"] in suppressed_fps or rec["fingerprint"] in accepted_fps:
+            # The same claim was rejected by a prior run, or accepted by the
+            # owner with a record, and its sources are unchanged: it is not
+            # queued again. The unit keeps the note.
             suppressed.append(rec["fingerprint"])
             continue
         if rec["fingerprint"] in known or any(a["fingerprint"] == rec["fingerprint"] for a in accepted):
@@ -812,7 +836,7 @@ def cmd_record(args: argparse.Namespace) -> None:
         if duplicates:
             u.setdefault("notes", []).extend(f"duplicate candidate fingerprint {fp} not queued twice" for fp in duplicates if fp in ru["candidate_fingerprints"])
         if suppressed:
-            u.setdefault("notes", []).extend(f"candidate {fp} suppressed: rejected by a prior run with unchanged sources" for fp in suppressed if fp in ru["candidate_fingerprints"])
+            u.setdefault("notes", []).extend((f"candidate {fp} suppressed: accepted by the owner with a record, sources unchanged" if fp in accepted_fps else f"candidate {fp} suppressed: rejected by a prior run with unchanged sources") for fp in suppressed if fp in ru["candidate_fingerprints"])
     candidates["candidates"].extend(accepted)
     for unc in result["uncovered"]:
         candidates["uncovered"].append({**unc, "agent_id": agent})
@@ -988,8 +1012,18 @@ FILE_RULE = "every `file` in trace, evidence and remediation is a path inside TA
 REQUIRED_FIELD_PARTS = ("finding_confirmed", "finding_needs_validation", "finding_rejected", "trace_entry", "evidence_entry")
 
 
+# E37 (gem-agent audit, 2026-11-09): a high was the documented behaviour of a
+# path the operator composes. New confirmed records answer whose act makes the
+# path happen and which record decided the behaviour; the schema keeps both
+# optional so the records of earlier runs still load as priors, and
+# findings.py add requires them.
+NEW_CONFIRMED_FIELDS = ("path_actor", "specified_in")
+
+
 def required_fields() -> dict:
-    return {part: list(c.schema_part(part).get("required", [])) for part in REQUIRED_FIELD_PARTS}
+    out = {part: list(c.schema_part(part).get("required", [])) for part in REQUIRED_FIELD_PARTS}
+    out["finding_confirmed"] += [f for f in NEW_CONFIRMED_FIELDS if f not in out["finding_confirmed"]]
+    return out
 
 
 def unit_brief(u: dict) -> dict:
@@ -1261,6 +1295,7 @@ def cmd_brief(args: argparse.Namespace) -> None:
             "carried": [{"fingerprint": r["fingerprint"], "title": r.get("title", ""), "verdict": r.get("verdict"), "carried_from": r.get("carried_from"), "coverage_ids": r.get("coverage_ids", [])} for r in candidates["carried"]],
             "uncovered": candidates["uncovered"],
             "suppressed": [r["fingerprint"] for r in candidates["suppressed"]],
+            "accepted_prior": [{"fingerprint": r["fingerprint"], "record": r["record"], "source_changed": r["source_changed"]} for r in candidates["accepted_prior"]],
             "merged": candidates["merged"],
             "prior_leads": candidates["prior_leads"],
         })
@@ -1409,11 +1444,18 @@ def counts(units: list) -> dict:
 
 
 UNITS_PER_HUNTER = 3
-# E26 (three E2E runs, 2026-11-08): the candidate rate splits by profile —
-# quick 0.48 and 0.43 per unit (one wave, every unit fresh), standard 0.26
-# (the prior run already took the easy claims); re-asks were 21%, 5%, 19%.
-CANDIDATES_PER_UNIT = {"quick": 0.45, "standard": 0.30}
+# E26 (three E2E runs, 2026-11-08): the candidate rate splits by whether the
+# unit was hunted before, not by profile — E38 (gem-agent, 2026-11-09): a
+# standard run with no prior produced 0.75 candidates per unit on 71 units
+# and ran out of a budget estimated at 0.30, while quick runs on fresh units
+# measured 0.48 and 0.43 and standard runs after a prior 0.26 and 0.38.
+# Re-asks were 21%, 5%, 19%, 22%.
+CANDIDATES_PER_UNIT = {"fresh": 0.60, "prior": 0.30}
 RERUN_RATE = 0.15
+
+
+def is_fresh(u: dict) -> bool:
+    return u.get("prior_status") in (None, "none", "new")
 
 
 def estimate_numbers(meta: dict, units: list, candidates: dict) -> dict:
@@ -1426,12 +1468,16 @@ def estimate_numbers(meta: dict, units: list, candidates: dict) -> dict:
     stages = 1 if quick else 2
     # E25: the critics still to launch, not the profile's total.
     critics = max(0, (1 if quick else 3) - int(meta["invocations"].get("critic", 0)))
-    rate = CANDIDATES_PER_UNIT[meta["profile"]]
+    hunting_units = [u for u in units if u["status"] in ("planned", "in_progress")]
+    fresh = sum(1 for u in hunting_units if is_fresh(u))
+    with_prior = hunting - fresh
     hunters = math.ceil(planned / UNITS_PER_HUNTER) if planned else 0
     # Once hunting is over the pending queue is the real count (E25); while
-    # units are still planned or in progress, expect `rate` candidates per
-    # unit, at least one.
-    expected_candidates = pending + (max(1, math.ceil(hunting * rate)) if hunting else 0)
+    # units are still planned or in progress, expect the measured rate of
+    # candidates per unit — fresh units and units with a prior apart (E38) —
+    # at least one.
+    projected = math.ceil(fresh * CANDIDATES_PER_UNIT["fresh"]) + math.ceil(with_prior * CANDIDATES_PER_UNIT["prior"])
+    expected_candidates = pending + (max(1, projected) if hunting else 0)
     verifiers = expected_candidates * stages
     # E33 (E2E run 4): in standard the second stage also re-verifies every
     # record already decided; subtract the re-verifiers already launched.
@@ -1440,20 +1486,26 @@ def estimate_numbers(meta: dict, units: list, candidates: dict) -> dict:
         verifiers += max(0, decided - int(meta["invocations"].get("reverifier", 0)))
     reruns = math.ceil((hunters + critics + verifiers) * RERUN_RATE)
     spent = sum(meta["invocations"].values())
+    total = spent + hunters + critics + verifiers + reruns
     return {
         "profile": meta["profile"],
         "spent": spent,
         "hunters": hunters,
         "units_per_hunter": UNITS_PER_HUNTER,
-        "candidates_per_unit": rate,
+        "fresh_units": fresh,
+        "prior_units": with_prior,
+        "candidates_per_unit": dict(CANDIDATES_PER_UNIT),
         "rerun_rate": RERUN_RATE,
         "critics": critics,
         "verification_stages": stages,
         "expected_candidates": expected_candidates,
         "verifiers": verifiers,
         "reruns": reruns,
-        "total_invocations": spent + hunters + critics + verifiers + reruns,
+        "total_invocations": total,
         "budget": meta["budget"],
+        # E38: the shortfall is the number to ask for, and the sign that the
+        # run will end incomplete if the budget is kept.
+        "shortfall": max(0, total - meta["budget"]) if meta["budget"] is not None else 0,
         "approved": bool(meta.get("approved")),
         "reserve_for_critics_and_verifiers": critics + verifiers,
     }

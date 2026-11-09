@@ -42,7 +42,7 @@ A gate that answers "is the operation allowed" never sees a wrong value
 inside an allowed operation: say so rather than claim a layer covers it.
 
 ## Resource and file handling
-Source: origin:ATTACK-CLASSES.md#Resource and file handling, security.md#Path confinement that checks a resolved path and then opens the original is a TOCTOU — make the check and the open one operation, security.md#Compare places by identity, not by name — this disk does not distinguish case, security.md#Clean up from what was created, not from what was planned — only an exclusive create's success enters the ledger, and only the ledger deletes, config-and-io.md#exec cancellation kills only the DIRECT child — a pipe-holding grandchild blocks Wait forever
+Source: origin:ATTACK-CLASSES.md#Resource and file handling, security.md#Path confinement that checks a resolved path and then opens the original is a TOCTOU — make the check and the open one operation, security.md#Compare places by identity, not by name — this disk does not distinguish case, security.md#Clean up from what was created, not from what was planned — only an exclusive create's success enters the ledger, and only the ledger deletes, config-and-io.md#exec cancellation kills only the DIRECT child — a pipe-holding grandchild blocks Wait forever, security.md#Building a tree with x/net/html allocates quadratically for some inputs — cut attacker HTML down before the parser
 
 Paths, links, archives, temporary files, child processes, limits. Path
 traversal through `..`, encodings, null bytes and links; archive extraction
@@ -52,7 +52,8 @@ swapped between them escapes); two names for one place (case, Unicode form,
 a hard link) defeating a string compare; cleanup that deletes what was
 planned rather than what was created; a time limit that stops the child but
 not the grandchild holding the pipes; reads, writes and recursion with no
-bound when the input is caller-controlled. Covered when the check and the
+bound when the input is caller-controlled, and work that grows faster than
+the input (a tree builder quadratic on some HTML). Covered when the check and the
 open are one operation on one file identity, places are compared by
 identity, cleanup deletes only what an exclusive create recorded, and limits
 reach the whole process group.

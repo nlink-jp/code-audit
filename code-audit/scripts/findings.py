@@ -5,7 +5,8 @@ Usage:
     findings.py validate <run-dir | findings.json> [--target <dir>]
     findings.py add <run-dir> <record.json> [--replace --by <agent> [--confirmed-by <agent>]] [--target <dir>]
     findings.py digest <record.json | hunter-result.json | verifier-return.json> --target <dir>
-    findings.py note <run-dir> --agent <id> --kind out_of_scope|hardening|lead --text TEXT [--coverage-id ID]
+    findings.py note <run-dir> --agent <id> --kind out_of_scope|hardening|lead|documentation --text TEXT [--coverage-id ID]
+    findings.py accept <run-dir> --fingerprint <fp> --record <ADR or document> --reason TEXT [--date YYYY-MM-DD] [--withdraw]
 
 `add` takes a record, or a verifier's whole return (its `record` is used),
 and inserts one validated record, sorted by fingerprint, for a claim the
@@ -17,12 +18,21 @@ findings.json whole. With --target, the record's source digests are checked
 against the current files so a stale record is refused. `digest` fills
 source_digests from the files a record cites, so the parent never computes
 one by hand. `validate <run-dir>` also cross-checks the records against the
-ledger's decisions.
+ledger's decisions. A new confirmed record also answers `path_actor` (whose
+act makes the path happen) and `specified_in` (the record that decided the
+behaviour, or `none`); one whose path the operator composes and whose
+behaviour a record decided is not a finding (rule 3) and is refused. `accept`
+is the owner's triage after the run: it logs that a confirmed finding is
+accepted as it stands, with the record that says so, in dispositions.json;
+the next run's `seed --prior` neither re-verifies nor re-reports it while
+its sources are unchanged. `--withdraw` logs the reversal; the log is
+append-only and the latest entry wins.
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import sys
 from pathlib import Path
 
@@ -121,6 +131,8 @@ def cmd_add(args: argparse.Namespace) -> None:
         c.die("record must be an object")
     target = Path(args.target) if args.target else None
     errors = ledger.record_errors(run_dir, rec, "record") + c.personal_identifier_errors(rec, "record")
+    if not errors:
+        errors += new_record_errors(rec, "record")
     c.fail_if(errors)
     findings = c.load_findings(run_dir)
     existing = [i for i, r in enumerate(findings) if r.get("fingerprint") == rec["fingerprint"]]
@@ -191,6 +203,28 @@ def cmd_add(args: argparse.Namespace) -> None:
     })
 
 
+SPECIFIED_NONE = "none"
+
+
+def new_record_errors(rec: dict, where: str) -> list[str]:
+    """What a record written by this version must answer beyond the schema
+    (E37, gem-agent audit 2026-11-09): whose act makes the path happen, and
+    which record decided the behaviour. A prior run's records are read
+    without these, so the schema keeps them optional and only `add` insists.
+    Rule 3 of references/severity.md: a path the operator composes, whose
+    behaviour a record decided, is not a finding — the verifier returns
+    `rejected` naming the record, and a `documentation` note when the record
+    is not stated where the operator reads."""
+    if rec.get("verdict") != "confirmed":
+        return []
+    errors = [f"{where}.{f}: a new confirmed record answers it (see required_fields in the brief)" for f in ledger.NEW_CONFIRMED_FIELDS if f not in rec]
+    if errors:
+        return errors
+    if rec["path_actor"] == "operator_composed" and rec["specified_in"].strip().lower() != SPECIFIED_NONE:
+        errors.append(f"{where}: not a finding (references/severity.md rule 3) — the path needs the operator's own act and {rec['specified_in']} decided the behaviour; return rejected with a reason naming that record, and a documentation note if it is not stated where the operator reads")
+    return errors
+
+
 def cited_files(rec: dict) -> list[str]:
     files = {t.get("file") for t in rec.get("trace", []) if isinstance(t, dict)}
     files |= {e.get("file") for e in rec.get("evidence", []) if isinstance(e, dict)}
@@ -242,6 +276,33 @@ def cmd_note(args: argparse.Namespace) -> None:
     c.emit({"notes": len(notes)})
 
 
+def cmd_accept(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    c.load_metadata(run_dir)
+    kind = "withdrawn" if args.withdraw else "accepted"
+    entry = {"fingerprint": args.fingerprint, "kind": kind, "record": args.record, "reason": args.reason, "date": args.date or _dt.date.today().isoformat()}
+    errors = c.validate_part(entry, "disposition", "disposition") + c.forbidden_char_errors(entry, "disposition") + c.personal_identifier_errors(entry, "disposition")
+    c.fail_if(errors)
+    findings = c.load_findings(run_dir)
+    rec = next((r for r in findings if r.get("fingerprint") == args.fingerprint), None)
+    if rec is None:
+        c.die(f"{args.fingerprint}: not in {c.FINDINGS_FILE}; only a record of this run can be accepted")
+    if rec.get("verdict") != "confirmed":
+        c.die(f"{args.fingerprint}: is {rec.get('verdict')}; only a confirmed finding is accepted (a lead is settled by validation, a rejected claim needs nothing)")
+    decided = {d["fingerprint"] for d in c.load_candidates(run_dir)["decided"]}
+    if (run_dir / c.LEDGER_FILE).exists() and args.fingerprint not in decided:
+        c.die(f"{args.fingerprint}: the ledger never decided it; run ledger.py decide first")
+    items = c.load_dispositions(run_dir)
+    current = c.accepted_dispositions(items)
+    if kind == "accepted" and args.fingerprint in current:
+        c.die(f"{args.fingerprint}: already accepted ({current[args.fingerprint]['record']}, {current[args.fingerprint]['date']}); pass --withdraw to reverse it")
+    if kind == "withdrawn" and args.fingerprint not in current:
+        c.die(f"{args.fingerprint}: not accepted; nothing to withdraw")
+    items.append(entry)
+    c.save_dispositions(run_dir, items)
+    c.emit({"fingerprint": args.fingerprint, "kind": kind, "record": args.record, "accepted": sorted(c.accepted_dispositions(items))})
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -268,10 +329,19 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("note")
     p.add_argument("run_dir")
     p.add_argument("--agent", required=True)
-    p.add_argument("--kind", required=True, choices=["out_of_scope", "hardening", "lead"])
+    p.add_argument("--kind", required=True, choices=["out_of_scope", "hardening", "lead", "documentation"])
     p.add_argument("--text", required=True)
     p.add_argument("--coverage-id")
     p.set_defaults(func=cmd_note)
+
+    p = sub.add_parser("accept")
+    p.add_argument("run_dir")
+    p.add_argument("--fingerprint", required=True)
+    p.add_argument("--record", required=True, help="the decision record that accepts the behaviour, e.g. ADR-0113 or docs/en/reference/approval.md")
+    p.add_argument("--reason", required=True)
+    p.add_argument("--date", help="YYYY-MM-DD; today when omitted")
+    p.add_argument("--withdraw", action="store_true", help="log that an earlier acceptance is reversed")
+    p.set_defaults(func=cmd_accept)
 
     args = parser.parse_args(argv)
     args.func(args)
