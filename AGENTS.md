@@ -60,7 +60,7 @@ code-audit/
 │   │                        critic_result, trace_entry, evidence_entry, finding_{confirmed,
 │   │                        needs_validation,rejected}, disposition, note
 │   ├── references/
-│   │   └── severity.md      Likelihood / impact / overall / confidence vocabulary, rules 1 and 2
+│   │   └── severity.md      Likelihood / impact / overall / confidence vocabulary, rules 1, 2 and 3
 │   └── scripts/             stdlib-only Python 3.9+
 │       ├── _contract.py     Schema-subset validator, JSON I/O, path and id rules, coverage_id, digests
 │       ├── run.py           Run metadata, budget/invocation counters, bounded `exec`
@@ -179,7 +179,8 @@ code-audit/
   (`new_record_errors`; `ledger.required_fields` lists them for the briefs);
   rule 3 — `operator_composed` with a `specified_in` other than `none` is
   refused as not a finding; note kind `documentation`. The estimate's
-  candidate rate is per unit by `is_fresh` (`prior_status` none/new) —
+  candidate rate is per unit by `is_fresh` (`prior_status` none, new,
+  prior_deferred or prior_out_of_scope: never hunted before) —
   `CANDIDATES_PER_UNIT = {"fresh": 0.60, "prior": 0.30}` — and returns
   `shortfall`. `findings.py accept` writes `dispositions.json`;
   `_contract.accepted_dispositions` reduces the log (latest wins);

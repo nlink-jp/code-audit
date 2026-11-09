@@ -65,3 +65,26 @@ E38: `estimate` は `fresh_units`・`prior_units`・`shortfall` を返し、`can
 は 2 値の表になった。E39: `dispositions.json` は findings.py が所有。報告書は所見の下に
 「所有者の処置」を、次走の報告書は「所有者が受け入れた前回の所見」を列挙する。
 E40: クラスは 54、出典 119 件を knowledge の実物で検査済み。
+
+## コミット時のレビュー（2026-11-09、独立のサブエージェント、読み取り専用）
+
+7 件＋軽微。6 件を採用し、1 件（連鎖）は文書で答えた。再現はレビュー側が使い捨ての
+スクリプトで実行して確かめている。
+
+- **採用**: 前回実行の dispositions・lead ノート・レコードに実行者ログインと絶対パスの
+  検査が無く、報告書に届いた → `load_prior` の落とす条件に `personal_identifier_errors`
+  を加えた（3 種とも）。複数 prior で同じ fingerprint が `carried` と `accepted_prior` の
+  両方に入った → 「後の prior の言葉が勝つ」を fingerprint 単位で全バケット（carried /
+  changed_prior / accepted_prior / suppressed）に適用し、1 件 1 バケットにした。
+  `is_fresh` が `prior_deferred` / `prior_out_of_scope` を「prior あり」で見積もった
+  （前回は狩っていない）→ fresh に含めた。自 run の `dispositions.json` が壊れていると
+  compile が KeyError → 所有ファイルとして読込時に検証し停止。`findings.py validate` が
+  規則 3 を再検査しない → 2 欄のどちらかを持つレコードには再適用。テストの OWNED_FILES に
+  `dispositions.json` が無い → 追加（SKILL の該当行も所有スクリプトを添えて書き直し）。
+  軽微: `status` に `accepted_prior`、日付は暦日として検査、クラス本文に落ちていた計測点
+  （タブ展開・JSON 表示・省略は先頭行／Parse 前に切る・Parse 失敗は木なし）。
+- **文書で答えた**: 受け入れは 1 走しか効かない（run2 が列挙するだけで記録を持たないので、
+  `--prior run2` だけの run3 では新規として狩られる）。受け入れは所有者が記録した run に
+  住み、その run が prior に含まれる間だけ効くと SKILL に明記した。Phase 0 の「前回実行は
+  すべて `--prior` に渡す」が前提で、受け入れを次の run に写す仕掛けは置かない（写すと
+  記録の正本が 2 つになる）。

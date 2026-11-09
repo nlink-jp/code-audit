@@ -74,3 +74,32 @@ E38: `estimate` returns `fresh_units`, `prior_units` and `shortfall`, and
 owned by `findings.py`; the report shows "Owner's disposition" under the
 finding and the next run's report lists "Prior findings the owner accepted".
 E40: 54 classes, 119 citations verified against the knowledge checkout.
+
+## Commit-time review (2026-11-09, independent read-only sub-agent)
+
+Seven findings plus nits; six adopted, one (chaining) answered in the text.
+The reviewer reproduced each with a throw-away script of its own.
+
+- **Adopted**: a prior run's dispositions, lead notes and records were not
+  checked for the operator's login or absolute paths and reached the report
+  → `load_prior` now drops all three on `personal_identifier_errors`. With
+  two priors one fingerprint sat in both `carried` and `accepted_prior` →
+  "the latest prior's word wins" is applied per fingerprint across every
+  bucket (carried / changed_prior / accepted_prior / suppressed), one entry
+  per fingerprint. `is_fresh` priced `prior_deferred` / `prior_out_of_scope`
+  units at the prior rate although nothing hunted them → counted as fresh. A
+  broken `dispositions.json` of the run itself made compile raise KeyError →
+  validated on load as an owned file, stopping the script. `findings.py
+  validate` did not re-check rule 3 → re-applied to any record carrying
+  either field. `dispositions.json` missing from the tests' OWNED_FILES →
+  added (and SKILL.md names the owning script beside it). Nits: `status`
+  prints `accepted_prior`; the date is checked as a calendar date; the class
+  texts gained the measurements they had dropped (expand tabs, JSON for
+  non-strings, state the omission on the first line; cut before Parse, a
+  failed Parse is "no tree").
+- **Answered in the text**: an acceptance works for one run only (run-2 lists
+  it without holding the record, so a run-3 with `--prior run-2` alone hunts
+  it as new). SKILL.md now says an acceptance lives in the run where the
+  owner logged it and applies while that run is among the priors — Phase 0
+  already says to pass every earlier run — and no mechanism copies it
+  forward (that would make two authoritative copies of the owner's record).

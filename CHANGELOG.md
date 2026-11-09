@@ -41,7 +41,19 @@ no prior; `docs/{ja,en}/reviews/2026-11-09-standard-gem-agent*.md`).
   run measured over 0.75 on 71 fresh units against a constant of 0.30 and
   ran out of budget). `estimate` returns `fresh_units`, `prior_units`,
   `candidates_per_unit` as a table and `shortfall`; SKILL.md says at the
-  cost gate that a lower budget ends the run incomplete.
+  cost gate that a lower budget ends the run incomplete. A unit a prior run
+  deferred or set aside counts as fresh (review).
+
+### Fixed
+
+- Commit-time review of cut 10 (record in the review document): a prior
+  run's dispositions, lead notes and records are dropped when they spell the
+  operator's login or an absolute local path; with several priors one
+  fingerprint sits in one bucket only, the latest prior's; a broken
+  `dispositions.json` of the run itself stops the scripts instead of
+  crashing `compile.py`; `findings.py validate` re-checks rule 3 on records
+  that carry the new fields; the acceptance date must be a calendar date;
+  `ledger.py status` prints `accepted_prior`.
 
 ## [0.1.0] - 2026-11-09
 
