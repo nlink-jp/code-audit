@@ -1,5 +1,48 @@
 # Changelog
 
+## [Unreleased]
+
+Cut (10): lessons E37–E40 of the first production run (gem-agent, standard,
+no prior; `docs/{ja,en}/reviews/2026-11-09-standard-gem-agent*.md`).
+
+### Added
+
+- **`findings.py accept`** (E39): the owner's triage logged in the run —
+  `--fingerprint`, `--record` (the ADR or document that keeps the
+  behaviour), `--reason`, optional `--date`, `--withdraw` to reverse — in
+  `dispositions.json` (append-only, latest entry wins). `compile.py` prints
+  the disposition under the finding; `seed --prior` lists an accepted record
+  as `accepted_prior` and marks its units `prior_accepted_same_source` /
+  `prior_accepted_changed_source`; with unchanged sources it is neither
+  carried for re-verification nor reported again (`ledger.py record`
+  suppresses the same claim), with changed sources the unit is hunted with
+  the acceptance as its pointer. Prior dispositions are validated like every
+  other prior input and dropped with a warning when they do not validate.
+- **Rule 3 of `references/severity.md`** (E37): a new confirmed record
+  answers `path_actor` (`unasked` / `operator_composed`) and `specified_in`
+  (the record that decided the behaviour, or `none`). An operator-composed
+  path whose behaviour a record decided is not a finding: `findings.py add`
+  refuses the confirmed form, the verifier returns `rejected` naming the
+  record, and a new note kind **`documentation`** holds the gap in what the
+  operator reads. The schema keeps both fields optional so prior runs'
+  records still load; the briefs' `required_fields` list them; the report
+  prints them under each finding.
+- Hunting classes (E40): `agent-runtime.md` gains "Approval dialog shows
+  less than the call" and "Lane-writable directory reused on resume"; the
+  toolchain-cache class cites the measured remedy (what an approved build
+  trusts sits outside every allow; a denial by name is a second line);
+  `generic.md`'s resource class cites the x/net/html quadratic allocation.
+  54 classes, 119 citations.
+
+### Changed
+
+- **Estimate** (E38): the candidate rate follows whether the unit has a
+  prior, not the profile (`fresh` 0.60, `prior` 0.30; the first production
+  run measured over 0.75 on 71 fresh units against a constant of 0.30 and
+  ran out of budget). `estimate` returns `fresh_units`, `prior_units`,
+  `candidates_per_unit` as a table and `shortfall`; SKILL.md says at the
+  cost gate that a lower budget ends the run incomplete.
+
 ## [0.1.0] - 2026-11-09
 
 First release: the full six-phase audit for both profiles, after Phase 3's

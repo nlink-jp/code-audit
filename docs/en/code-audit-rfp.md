@@ -556,3 +556,17 @@ independent pass), it sits beside compliance-review and incident-review.
 - **2026-11-09 v0.1.0 release**: first release after Phase 3's four runs and
   cut (9); the remote `nlink-jp/code-audit` created and added to the
   skills-series umbrella as a submodule.
+- **2026-11-09 first production run (gem-agent / standard / no prior) and
+  cut (10)**: another session ran 138 invocations, used up the budget of 140
+  and ended incomplete (71 units, 37 confirmed). The owner withdrew one high
+  as specified (ADR-0110), accepted three medium with reasons (ADR-0113) and
+  fixed the rest in v0.100.0 / v0.100.1. Record:
+  `docs/en/reviews/2026-11-09-standard-gem-agent.md`. Lessons E37–E40
+  adopted in cut (10) (107 tests): E37 `path_actor` / `specified_in` on a
+  confirmed record and rule 3 (an operator-composed path whose behaviour a
+  record decided is not a finding; optional in the schema, required and
+  refused by `findings.py add`; `documentation` notes), E38 the estimate's
+  candidate rate by whether the unit has a prior (fresh 0.60 / prior 0.30,
+  `shortfall`), E39 the owner's acceptance logged with `findings.py accept`
+  so `seed --prior` stops re-verifying and re-reporting it, E40 four new
+  knowledge lessons in the classes (54 classes, 119 citations).

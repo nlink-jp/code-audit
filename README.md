@@ -122,7 +122,16 @@ local path is refused wherever it enters the books (the agent describes,
 never spells); the hunter's brief lists the files under its units' starting
 paths; the verifier's brief names the fields of trace and evidence entries;
 the estimate counts the re-verification of decided records; the report
-counts weakening replacements apart from wording fixes.
+counts weakening replacements apart from wording fixes. From the first
+production run (`docs/en/reviews/2026-11-09-standard-gem-agent.md`, an agent
+runtime, standard, no prior): a confirmed record answers whose act makes the
+path happen and which record decided the behaviour, and an operator-composed
+path whose behaviour a record decided is not a finding (rule 3, refused by
+`findings.py add`; the gap in what the operator reads is a `documentation`
+note); the estimate prices a unit no prior run hunted at twice the rate of
+one that follows a prior and prints the shortfall; the owner's acceptance of
+a finding is logged in the run (`findings.py accept`) and the next run
+neither re-verifies nor re-reports it while its sources are unchanged.
 Residual risks are in the RFP: the target's own tests run unsandboxed as
 your user, and whether a sub-agent really has no shell depends on the agent
 type the runtime offers.
@@ -137,7 +146,7 @@ make package    # dist/code-audit-vX.Y.Z.zip (zip root = skill folder)
 Bundled scripts are stdlib-only Python 3.9+ (`--help` on each): `run.py`
 (run metadata, bounded execution of the target's existing tests),
 `ledger.py` (coverage ledger and candidate queue), `findings.py` (findings
-records, digests and notes), `compile.py` (reports), `classes.py`
+records, digests, notes and the owner's dispositions), `compile.py` (reports), `classes.py`
 (hunting-class checks). Rules for contributors and agents: [`CLAUDE.md`](CLAUDE.md),
 [`AGENTS.md`](AGENTS.md).
 

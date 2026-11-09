@@ -106,7 +106,13 @@ coverage_id を打ち直さない。ツールチェーンのキャッシュは r
 帳簿に入る場所すべてで拒む（エージェントは綴らず記述する）。hunter の brief は単位の
 starting_paths 配下のファイル一覧を運ぶ。verifier の brief は trace / evidence の
 欄名も載せる。見積もりは決定済みレコードの再検証を数える。報告書は弱化の置換を文言の
-修正と分けて数える。
+修正と分けて数える。実戦投入の第 1 走（`docs/ja/reviews/2026-11-09-standard-gem-agent.ja.md`、
+エージェントランタイム・standard・prior なし）から: confirmed レコードは「誰の行為で
+成立するか」「その動作を決めた記録はあるか」に答え、操作者が組む経路で記録のあるものは
+所見でない（規則 3。`findings.py add` が拒み、操作者の読む場所に無いという欠けは
+`documentation` ノート）。見積もりは前回狩られていない単位を prior のある単位の 2 倍の
+候補率で見込み、不足分を印字する。所有者が所見を受け入れたことは run に記録し
+（`findings.py accept`）、次走は引用元が変わらない限り再検証も再報告もしない。
 残余リスクは RFP に記載: 対象自身のテストはサンドボックスなしに利用者の権限で
 走る。サブエージェントに本当にシェルが無いかは、ランタイムが提供する
 エージェント種別に依る。
@@ -120,7 +126,7 @@ make package    # dist/code-audit-vX.Y.Z.zip（zip ルート = スキルフォ�
 
 同梱スクリプトは標準ライブラリだけの Python 3.9 以上です（各 `--help`）。
 `run.py`（実行メタデータ・承認・対象の既存テストの有界実行）、`ledger.py`
-（網羅台帳と候補の待ち行列）、`findings.py`（所見レコード・digest・覚え書き）、
+（網羅台帳と候補の待ち行列）、`findings.py`（所見レコード・digest・覚え書き・所有者の処置）、
 `compile.py`（報告書）、`classes.py`（狩りクラスの検査）。貢献者と
 エージェント向けの規則は [`CLAUDE.md`](CLAUDE.md) と [`AGENTS.md`](AGENTS.md)。
 

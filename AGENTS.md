@@ -22,7 +22,11 @@ verification rounds ran on 2026-11-08 and their adopted findings are applied
 second having found no high defect in the scripts. Phase 3: all four E2E
 runs are done with cost recorded (`docs/{ja,en}/reviews/`); cut 8 applied
 the first three runs' lessons and cut 9 the fourth run's (E29–E35; E36
-waits for more measurements). Released as v0.1.0 on 2026-11-09.
+waits for more measurements). Released as v0.1.0 on 2026-11-09. The first
+production run (gem-agent, standard, no prior, 2026-11-09) gave E37–E40,
+applied in cut 10 (unreleased): rule 3 and the two record fields, the
+estimate's fresh/prior rates, the owner's dispositions, four new citations
+(54 classes, 119 citations).
 
 ## Key commands
 
@@ -41,7 +45,7 @@ Bundled scripts (stdlib-only Python 3.9+; `--help` on each):
 |--------|-------------|------|
 | `run.py` | `init`, `approve [--budget N]`, `nonce`, `set-budget`, `count [--agent [--rerun]]`, `set-status`, `validate`, `exec` | `run-metadata.json`, `checks/<id>.log`, `cache/` (toolchain caches `exec` redirects) |
 | `ledger.py` | `seed [--prior]`, `architecture`, `assign`, `record`, `merge-critic`, `merge-candidates`, `brief hunter|critic|verifier|reverifier [--target]`, `decide`, `defer`, `abandon`, `estimate`, `validate`, `status` | `coverage-ledger.json`, `candidates.json`, `architecture.md` (and appends hunter notes to `notes.json`) |
-| `findings.py` | `validate`, `add [--replace --by <agent> [--confirmed-by <agent>]]`, `digest`, `note` | `findings.json`, `replacements.json`, `notes.json` (`digest` writes back the record file it is given) |
+| `findings.py` | `validate`, `add [--replace --by <agent> [--confirmed-by <agent>]]`, `digest`, `note`, `accept [--withdraw]` | `findings.json`, `replacements.json`, `dispositions.json`, `notes.json` (`digest` writes back the record file it is given) |
 | `compile.py` | (run dir) | `REPORT.ja.md`, `REPORT.md`, `NEEDS-VALIDATION.ja.md`, `NEEDS-VALIDATION.md` |
 | `classes.py` | `list`, `size`, `check-knowledge [--adr] [--origin]` | nothing; checks `classes/*.md` |
 
@@ -54,7 +58,7 @@ code-audit/
 │   ├── classes/             Hunting classes: generic.md + mcp-server.md, cli.md, agent-runtime.md
 │   ├── schema.json          Parts: metadata, commands, unit_proposal, check, unit, hunter_result,
 │   │                        critic_result, trace_entry, evidence_entry, finding_{confirmed,
-│   │                        needs_validation,rejected}, note
+│   │                        needs_validation,rejected}, disposition, note
 │   ├── references/
 │   │   └── severity.md      Likelihood / impact / overall / confidence vocabulary, rules 1 and 2
 │   └── scripts/             stdlib-only Python 3.9+
@@ -93,10 +97,11 @@ code-audit/
 | `checks/<id>.log` | `run.py exec` | command, allowed variable names, the cache variables set, exit code, duration, stdout/stderr |
 | `cache/` | `run.py exec` | `GOCACHE`, `XDG_CACHE_HOME`, `PYTHONPYCACHEPREFIX` of the commands it runs (`GOPROXY=off`, `GOFLAGS=-mod=readonly`, `GOTOOLCHAIN=local`: no downloads) |
 | `coverage-ledger.json` | `ledger.py` | units: canonical refs → `coverage_id`, starting paths + `source_digests`, prior_status, state, owner, checks, fingerprints, decisions, archived `attempts` |
-| `candidates.json` | `ledger.py` | `candidates` (hunter-proposed, pending), `carried` (from prior runs), `decided`, `suppressed` (prior rejected, same source), `uncovered`, `resolved_prior_leads`, `merged` (duplicates folded into a kept fingerprint), `prior_leads` (`lead` notes of prior runs, for the critic) |
+| `candidates.json` | `ledger.py` | `candidates` (hunter-proposed, pending), `carried` (from prior runs), `decided`, `suppressed` (prior rejected, same source), `accepted_prior` (prior confirmed records the owner accepted, with the record and whether sources changed), `uncovered`, `resolved_prior_leads`, `merged` (duplicates folded into a kept fingerprint), `prior_leads` (`lead` notes of prior runs, for the critic) |
 | `findings.json` | `findings.py` | decided records, sorted by fingerprint |
 | `replacements.json` | `findings.py add --replace` | every re-verification replacement: previous and new verdict, the strengthened fields, who wrote it, who confirmed it |
-| `notes.json` | `ledger.py record` / `findings.py note` | hardening, out-of-scope and lead notes with the author's agent id |
+| `notes.json` | `ledger.py record` / `findings.py note` | hardening, out-of-scope, lead and documentation notes with the author's agent id |
+| `dispositions.json` | `findings.py accept` | the owner's triage: `accepted` / `withdrawn` per fingerprint with the record (ADR, document), reason and date; append-only, latest entry wins |
 | `architecture.md`, `proposals.json`, `agents/<id>.json` | the parent | reconnaissance summary, the unit proposals given to `seed`, the raw return of every sub-agent |
 | `REPORT*.md`, `NEEDS-VALIDATION*.md` | `compile.py` | derived reports |
 
@@ -168,6 +173,20 @@ code-audit/
   the files under the starting paths (cap 400, links by name, `.git`
   skipped); `findings.py add --replace` logs `weakened` and `compile.py`
   words the replacement line by kind.
+- **Cut 10 (first production run, gem-agent)**: `finding_confirmed` has two
+  more fields, `path_actor` and `specified_in`, optional in the schema (a
+  prior run's records must still load) and required by `findings.py add`
+  (`new_record_errors`; `ledger.required_fields` lists them for the briefs);
+  rule 3 — `operator_composed` with a `specified_in` other than `none` is
+  refused as not a finding; note kind `documentation`. The estimate's
+  candidate rate is per unit by `is_fresh` (`prior_status` none/new) —
+  `CANDIDATES_PER_UNIT = {"fresh": 0.60, "prior": 0.30}` — and returns
+  `shortfall`. `findings.py accept` writes `dispositions.json`;
+  `_contract.accepted_dispositions` reduces the log (latest wins);
+  `load_prior` reads and validates it; `seed` emits `accepted_prior`, the
+  unit statuses `prior_accepted_same_source` (rank 1, below everything) and
+  `prior_accepted_changed_source` (rank 3); `record` suppresses an accepted
+  same-source claim with its own note text.
 - **`decide` requires the record first** (`findings.py add`), then links the
   fingerprint to units; a carried record on a still-planned unit needs
   `--agent` (the verifier becomes the owner).
@@ -284,7 +303,9 @@ code-audit/
   a 30-second grandchild under a 1-second limit.
 - **Evidence kinds:** `source` or `existing_test` (a `checks/` log).
   `findings.py validate` enforces rule 1 (overall ≤ impact) and rule 2
-  (source-only ⇒ confidence ≤ medium) from `references/severity.md`; the
+  (source-only ⇒ confidence ≤ medium) from `references/severity.md`, and
+  `findings.py add` rule 3 (an operator-composed path whose behaviour a
+  record decided is not a finding) on new records; the
   report shows the evidence kind beside every confirmed finding. This is a
   user decision recorded in the RFP; do not re-open it.
 - **`compile.py` escapes prose** (collapses lines, breaks ``` and `|`) and

@@ -477,3 +477,14 @@ compliance-review / incident-review と並ぶ。
   残りはリリース。
 - **2026-11-09 v0.1.0 リリース**: Phase 3 の 4 走と区切り (9) を経て初版を公開。
   リモート `nlink-jp/code-audit` を作成し、skills-series の submodule に追加。
+- **2026-11-09 実戦投入 第 1 走（gem-agent / standard / prior なし）と区切り (10)**:
+  別セッションが 138 回で走らせ、budget 140 を使い切って incomplete（71 単位、confirmed 37）。
+  所有者は high 1 件を仕様（ADR-0110）として取り下げ、medium 3 件を理由つきで受け入れ
+  （ADR-0113）、残りを v0.100.0 / v0.100.1 で修正した。記録は
+  `docs/ja/reviews/2026-11-09-standard-gem-agent.ja.md`。学び E37〜E40 を区切り (10) で
+  採用（107 テスト緑）: E37 confirmed レコードの `path_actor` / `specified_in` と規則 3
+  （操作者が組む経路で記録のあるものは所見でない。スキーマでは任意・`findings.py add` が
+  必須として要求し拒む。`documentation` ノート）、E38 見積もりの候補率を単位に prior が
+  あるかで分ける（fresh 0.60 / prior 0.30、`shortfall`）、E39 所有者の受け入れを
+  `findings.py accept` で run に記録し `seed --prior` が再検証・再報告を止める、E40
+  knowledge の新しい教訓 4 件をクラスに追随（54 クラス・出典 119）。
