@@ -158,9 +158,13 @@ in that run, naming the ADR or document that keeps the behaviour) is listed
 as **accepted_prior**: with unchanged sources it is neither re-verified nor
 re-reported (`ledger.py record` drops the same claim as suppressed); with
 changed sources the unit is hunted with `prior_accepted_changed_source` as
-its pointer, and the report says the acceptance predates the change. The
+its pointer, and the report lists the acceptance with "sources changed". An
+acceptance lives in the run where the owner logged it and applies while
+that run is among the priors — so keep passing every earlier run, as said
+above; a run that merely listed an accepted prior holds no record of it. The
 same prior given twice counts once; priors are read oldest first, so the
-latest run's verdict wins where they disagree.
+latest run's word on a fingerprint wins where they disagree (one bucket per
+fingerprint: carried, changed, accepted or suppressed).
 
 ## Phase 1 — Reconnaissance (four roles, in parallel, read-only)
 
@@ -621,7 +625,7 @@ python3 SKILL_DIR/scripts/findings.py add RUN RUN/agents/verifier-N.json --targe
 python3 SKILL_DIR/scripts/ledger.py decide RUN --fingerprint <fp> --verdict <verdict> [--agent verifier-N]
 ```
 
-`findings.py add` enforces the bar (rules 1 and 2, trace order, relative
+`findings.py add` enforces the bar (rules 1, 2 and 3, trace order, relative
 paths, fresh digests) and takes only a pending candidate of this run;
 `decide` links the record to its units. Pass `--agent verifier-N` for a
 carried record whose unit is still `planned` or `deferred` (no hunter
@@ -741,8 +745,8 @@ python3 SKILL_DIR/scripts/compile.py RUN
    The report then shows the disposition under the finding, and the next
    run's `seed --prior` lists the record as `accepted_prior` instead of
    re-verifying or re-reporting it while its sources are unchanged.
-   `--withdraw` logs a reversal; `dispositions.json` is append-only and the
-   latest entry wins. A finding fixed in the code needs no entry: the
+   `findings.py accept --withdraw` logs a reversal in `dispositions.json`,
+   which `findings.py` keeps append-only; the latest entry wins. A finding fixed in the code needs no entry: the
    changed sources already keep it from being carried.
 
 ## What the parent never does

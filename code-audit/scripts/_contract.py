@@ -542,6 +542,10 @@ def load_dispositions(run_dir: Path) -> list:
     data = read_json(path)
     if not isinstance(data, list):
         die(f"{DISPOSITIONS_FILE}: must be an array")
+    errors: list[str] = []
+    for i, d in enumerate(data):
+        errors += validate_part(d, "disposition", f"dispositions[{i}]")
+    fail_if(errors)
     return data
 
 

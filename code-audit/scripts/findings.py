@@ -50,6 +50,10 @@ def validate_findings(run_dir: Path | None, findings: list, target: Path | None)
             errors.append(f"{base}: expected object")
             continue
         errors += ledger.record_errors(run_dir, rec, base)
+        if not errors and any(f in rec for f in ledger.NEW_CONFIRMED_FIELDS):
+            # A record of this version is held to rule 3 on every validate;
+            # a prior run's record (neither field) is read as it was written.
+            errors += new_record_errors(rec, base)
         fp = rec.get("fingerprint")
         if isinstance(fp, str):
             if fp in seen:
@@ -282,6 +286,11 @@ def cmd_accept(args: argparse.Namespace) -> None:
     kind = "withdrawn" if args.withdraw else "accepted"
     entry = {"fingerprint": args.fingerprint, "kind": kind, "record": args.record, "reason": args.reason, "date": args.date or _dt.date.today().isoformat()}
     errors = c.validate_part(entry, "disposition", "disposition") + c.forbidden_char_errors(entry, "disposition") + c.personal_identifier_errors(entry, "disposition")
+    if not errors:
+        try:
+            _dt.date.fromisoformat(entry["date"])
+        except ValueError:
+            errors.append(f"disposition.date: {entry['date']} is not a calendar date")
     c.fail_if(errors)
     findings = c.load_findings(run_dir)
     rec = next((r for r in findings if r.get("fingerprint") == args.fingerprint), None)

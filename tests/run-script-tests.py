@@ -35,7 +35,7 @@ SAMPLE_REPO = FIXTURES / "sample-repo"
 
 STDLIB = set(getattr(sys, "stdlib_module_names", ()))  # Python 3.10+; empty on 3.9
 ABSOLUTE_PATH = re.compile(r"(?<![\w/])/(?:Users|home|private|Volumes)/")
-OWNED_FILES = ("coverage-ledger.json", "findings.json", "candidates.json", "run-metadata.json", "notes.json", "replacements.json")
+OWNED_FILES = ("coverage-ledger.json", "findings.json", "candidates.json", "run-metadata.json", "notes.json", "replacements.json", "dispositions.json")
 OWNING_SCRIPTS = ("ledger.py", "findings.py", "run.py")
 
 
@@ -1493,6 +1493,14 @@ class FindingsTests(RunFixture):
         self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", rec["fingerprint"], "--verdict", "confirmed"))
         self.ok(run("findings.py", "add", str(self.run_dir), str(self.write_json({**rec, "path_actor": "operator_composed", "specified_in": "none"}, "composed.json")), "--replace", "--by", "reverifier-1"))
         self.refused(run("findings.py", "add", str(self.run_dir), str(self.write_json({**rec, "path_actor": "typed", "specified_in": "none"}, "bad.json")), "--replace", "--by", "reverifier-2"), "path_actor")
+        # review of cut 10: validate re-checks rule 3 on a record that carries the fields
+        findings = json.loads((self.run_dir / "findings.json").read_text(encoding="utf-8"))
+        findings[0]["specified_in"] = "ADR-0055 §3"
+        (self.run_dir / "findings.json").write_text(json.dumps(findings), encoding="utf-8")
+        self.refused(run("findings.py", "validate", str(self.run_dir)), "rule 3")
+        findings[0]["specified_in"] = "none"
+        (self.run_dir / "findings.json").write_text(json.dumps(findings), encoding="utf-8")
+        self.ok(run("findings.py", "validate", str(self.run_dir)))
         # a documentation note is where the gap in what the operator reads goes
         before = len(json.loads((self.run_dir / "notes.json").read_text(encoding="utf-8")))
         out = self.ok(run("findings.py", "note", str(self.run_dir), "--agent", "verifier-7", "--kind", "documentation", "--text", "the decision is in ADR-0055 but not in the interface reference"))
@@ -1515,6 +1523,7 @@ class FindingsTests(RunFixture):
         self.ok(run("ledger.py", "decide", str(self.run_dir), "--fingerprint", "app/files.py:read_user_file:symlink-escape", "--verdict", "needs_validation"))
         self.refused(run("findings.py", "accept", str(self.run_dir), "--fingerprint", "app/files.py:read_user_file:symlink-escape", "--record", "ADR-0113", "--reason", "x"), "only a confirmed finding is accepted")
         self.refused(run("findings.py", "accept", str(self.run_dir), "--fingerprint", fp, "--record", "ADR-0113", "--reason", "x", "--date", "9 Nov"), "disposition.date")
+        self.refused(run("findings.py", "accept", str(self.run_dir), "--fingerprint", fp, "--record", "ADR-0113", "--reason", "x", "--date", "2026-13-45"), "not a calendar date")
         import getpass
         login = getpass.getuser()
         if len(login) >= 3:
@@ -1783,9 +1792,9 @@ class PriorRunTests(RunFixture):
         self.assertIn(fp, rec["suppressed_candidates"])
         unit = next(u for u in json.loads((run2 / "coverage-ledger.json").read_text(encoding="utf-8")) if u["coverage_id"] == u1)
         self.assertTrue(any("accepted by the owner" in n for n in unit.get("notes", [])), unit.get("notes"))
-        # the estimate counts both units as units with a prior (E38)
+        # hunting is over for both units, so neither is counted as fresh or prior (E38)
         est = self.ok(run("ledger.py", "estimate", str(run2)))
-        self.assertEqual((est["fresh_units"], est["prior_units"]), (0, 0))  # hunting is over for both
+        self.assertEqual((est["fresh_units"], est["prior_units"]), (0, 0))
         self.ok(run("compile.py", str(run2)))
         en = (run2 / "REPORT.md").read_text(encoding="utf-8")
         self.assertIn("Prior findings the owner accepted", en)
@@ -1817,6 +1826,64 @@ class PriorRunTests(RunFixture):
         out = self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
         self.assertEqual(out["accepted_prior"], [fp])
         self.assertTrue(any("disposition 1 dropped" in w for w in out["warnings"]), out["warnings"])
+        # review of cut 10: a prior's disposition, lead note or record that spells
+        # an absolute local path never reaches this run's books or report
+        (self.run_dir / "dispositions.json").write_text(json.dumps([{"fingerprint": fp, "kind": "accepted", "record": "/Users/someone/adr/ADR-0113.md", "reason": "kept", "date": "2026-11-09"}]), encoding="utf-8")
+        notes = json.loads((self.run_dir / "notes.json").read_text(encoding="utf-8"))
+        notes.append({"agent_id": "hunter-1", "kind": "lead", "text": "see /home/someone/notes.txt"})
+        (self.run_dir / "notes.json").write_text(json.dumps(notes), encoding="utf-8")
+        run3 = self.tmpdir / "out" / "run-3"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run3), "--prior", str(self.run_dir)))
+        out = self.ok(run("ledger.py", "seed", str(run3), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        self.assertEqual((out["accepted_prior"], out["carried"]), ([], [fp]))  # no valid acceptance left: carried as before
+        self.assertEqual(out["prior_leads"], 0)
+        self.assertNotIn("/Users/someone", (run3 / "candidates.json").read_text(encoding="utf-8"))
+        # the run's own log is an owned file: a broken entry stops the scripts
+        (self.run_dir / "dispositions.json").write_text(json.dumps([{"fingerprint": fp, "kind": "accepted"}]), encoding="utf-8")
+        self.refused(run("compile.py", str(self.run_dir)), "dispositions[0]")
+
+    def test_latest_prior_wins_between_acceptance_and_a_later_confirmation(self) -> None:
+        # review of cut 10: with two priors, one fingerprint sat in both
+        # accepted_prior and carried; the later prior's word wins, once.
+        fp = self.accepted_run()
+        later = self.tmpdir / "out" / "later"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(later)))
+        shutil.copy(FIXTURES / "commands.json", later / "commands.json")
+        self.ok(run("ledger.py", "seed", str(later), "--target", str(self.target), "--units", str(FIXTURES / "units.json")))
+        self.ok(run("run.py", "approve", str(later), "--budget", "40"))
+        self.architecture(later)
+        self.ok(run("run.py", "exec", str(later), "unit-tests", "--target", str(self.target)))
+        u1, u2 = self.unit_ids()
+        self.ok(run("ledger.py", "assign", str(later), "--agent", "hunter-1", u1, u2))
+        self.ok(run("ledger.py", "record", str(later), str(self.fill("hunter-result.json"))))
+        self.ok(run("findings.py", "add", str(later), str(self.write_json(self.candidate_record(0), "l0.json"))))
+        self.ok(run("ledger.py", "decide", str(later), "--fingerprint", fp, "--verdict", "confirmed"))
+        run3 = self.tmpdir / "out" / "run-3"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run3), "--prior", str(self.run_dir), "--prior", str(later)))
+        out = self.ok(run("ledger.py", "seed", str(run3), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir), "--prior", str(later)))
+        self.assertEqual((out["carried"], out["accepted_prior"]), ([fp], []))
+        cands = json.loads((run3 / "candidates.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(cands["carried"]), 1)
+        # and the reverse order: the acceptance is the later word
+        self.ok(run("findings.py", "accept", str(later), "--fingerprint", fp, "--record", "ADR-0113", "--reason", "kept", "--date", "2026-11-10"))
+        (self.run_dir / "dispositions.json").unlink()
+        run4 = self.tmpdir / "out" / "run-4"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run4), "--prior", str(self.run_dir), "--prior", str(later)))
+        out = self.ok(run("ledger.py", "seed", str(run4), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir), "--prior", str(later)))
+        self.assertEqual((out["carried"], out["accepted_prior"]), ([], [fp]))
+        self.assertEqual(self.ok(run("ledger.py", "status", str(run4)))["accepted_prior"], [fp])
+
+    def test_deferred_prior_units_are_estimated_as_fresh(self) -> None:
+        # review of cut 10: a unit the prior run deferred was never hunted
+        self.seed()
+        self.ok(run("ledger.py", "defer", str(self.run_dir), "--reason", "budget", "--all-planned"))
+        run2 = self.tmpdir / "out" / "run-2"
+        self.ok(run("run.py", "init", "--target", str(self.target), "--output", str(run2), "--prior", str(self.run_dir)))
+        self.ok(run("ledger.py", "seed", str(run2), "--target", str(self.target), "--units", str(FIXTURES / "units.json"), "--prior", str(self.run_dir)))
+        units = json.loads((run2 / "coverage-ledger.json").read_text(encoding="utf-8"))
+        self.assertTrue(all(u["prior_status"] == "prior_deferred" for u in units))
+        est = self.ok(run("ledger.py", "estimate", str(run2)))
+        self.assertEqual((est["fresh_units"], est["prior_units"]), (2, 0))
 
 
 class CompileTests(RunFixture):

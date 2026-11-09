@@ -390,7 +390,7 @@ def load_prior(path: Path) -> dict:
     if findings_path.exists():
         raw = c.read_json(findings_path)
         for i, rec in enumerate(raw if isinstance(raw, list) else []):
-            if not isinstance(rec, dict) or record_errors(None, rec, f"prior.findings[{i}]"):
+            if not isinstance(rec, dict) or record_errors(None, rec, f"prior.findings[{i}]") or c.personal_identifier_errors(rec, f"prior.findings[{i}]"):
                 warnings.append(f"prior {path.name}: record {i} dropped (does not validate)")
                 continue
             findings.append(rec)
@@ -401,7 +401,7 @@ def load_prior(path: Path) -> dict:
         for i, note in enumerate(raw if isinstance(raw, list) else []):
             if not isinstance(note, dict) or note.get("kind") != "lead":
                 continue
-            if c.validate_part(note, "note", f"prior.notes[{i}]") or c.forbidden_char_errors(note, f"prior.notes[{i}]"):
+            if c.validate_part(note, "note", f"prior.notes[{i}]") or c.forbidden_char_errors(note, f"prior.notes[{i}]") or c.personal_identifier_errors(note, f"prior.notes[{i}]"):
                 warnings.append(f"prior {path.name}: lead note {i} dropped (does not validate)")
                 continue
             leads.append(note)
@@ -410,7 +410,7 @@ def load_prior(path: Path) -> dict:
     if disp_path.exists():
         raw = c.read_json(disp_path)
         for i, d in enumerate(raw if isinstance(raw, list) else []):
-            if not isinstance(d, dict) or c.validate_part(d, "disposition", f"prior.dispositions[{i}]") or c.forbidden_char_errors(d, f"prior.dispositions[{i}]"):
+            if not isinstance(d, dict) or c.validate_part(d, "disposition", f"prior.dispositions[{i}]") or c.forbidden_char_errors(d, f"prior.dispositions[{i}]") or c.personal_identifier_errors(d, f"prior.dispositions[{i}]"):
                 warnings.append(f"prior {path.name}: disposition {i} dropped (does not validate)")
                 continue
             dispositions.append(d)
@@ -506,6 +506,10 @@ def cmd_seed(args: argparse.Namespace) -> None:
         # records the strongest prior claim wins for the unit.
         rank = {"prior_confirmed_changed_source": 7, "prior_confirmed_same_source": 6, "prior_needs_validation_changed_source": 5, "prior_needs_validation": 4, "prior_accepted_changed_source": 3, "prior_rejected_claim_changed": 2, "prior_accepted_same_source": 1}
         proposed: dict[str, str] = {}
+        # The latest prior's word on a fingerprint wins (priors are sorted
+        # oldest first): a claim is in one of these buckets, never two.
+        buckets = ("carried", "changed_prior", "accepted_prior", "suppressed")
+        latest_bucket: dict[str, str] = {}
 
         def propose(u: dict, status: str) -> None:
             cur = proposed.get(u["coverage_id"])
@@ -544,14 +548,17 @@ def cmd_seed(args: argparse.Namespace) -> None:
                     for u in linked:
                         propose(u, "prior_accepted_same_source" if same else "prior_accepted_changed_source")
                     candidates["accepted_prior"].append({"fingerprint": fp, "title": rec.get("title", ""), "prior_run": prior["run_id"], "record": disp["record"], "reason": disp["reason"], "date": disp["date"], "source_changed": not same, "units": [u["coverage_id"] for u in linked]})
+                    latest_bucket[fp] = "accepted_prior"
                     continue
                 if verdict == "confirmed":
                     for u in linked:
                         propose(u, "prior_confirmed_same_source" if same else "prior_confirmed_changed_source")
                     if same:
                         candidates["carried"].append(carried)
+                        latest_bucket[fp] = "carried"
                     else:
                         candidates["changed_prior"].append({"fingerprint": fp, "title": rec.get("title", ""), "verdict": verdict, "prior_run": prior["run_id"], "units": [u["coverage_id"] for u in linked]})
+                        latest_bucket[fp] = "changed_prior"
                 elif verdict == "needs_validation":
                     # E30 (E2E run 4): a lead whose source changed is listed
                     # as changed_prior, and its unit says so too.
@@ -559,11 +566,14 @@ def cmd_seed(args: argparse.Namespace) -> None:
                         propose(u, "prior_needs_validation" if same else "prior_needs_validation_changed_source")
                     if same:
                         candidates["carried"].append(carried)
+                        latest_bucket[fp] = "carried"
                     else:
                         candidates["changed_prior"].append({"fingerprint": fp, "title": rec.get("title", ""), "verdict": verdict, "prior_run": prior["run_id"], "units": [u["coverage_id"] for u in linked]})
+                        latest_bucket[fp] = "changed_prior"
                 elif verdict == "rejected":
                     if same:
                         candidates["suppressed"].append({"fingerprint": fp, "title": rec.get("title", ""), "prior_run": prior["run_id"]})
+                        latest_bucket[fp] = "suppressed"
                     else:
                         for u in linked:
                             propose(u, "prior_rejected_claim_changed")
@@ -575,10 +585,14 @@ def cmd_seed(args: argparse.Namespace) -> None:
         for prior in priors:
             for note in prior["leads"]:
                 candidates["prior_leads"].append({**note, "prior_run": prior["run_id"]})
-        # The latest prior's verdict wins: a claim carried for re-verification
-        # is not also suppressed.
-        carried_fps = {r["fingerprint"] for r in candidates["carried"]}
-        candidates["suppressed"] = [r for r in candidates["suppressed"] if r["fingerprint"] not in carried_fps]
+        # The latest prior's word wins: a fingerprint sits in one bucket, once
+        # (the last entry appended for it, which is the latest prior's).
+        for bucket in buckets:
+            kept: dict[str, dict] = {}
+            for r in candidates[bucket]:
+                if latest_bucket.get(r["fingerprint"]) == bucket:
+                    kept[r["fingerprint"]] = r
+            candidates[bucket] = list(kept.values())
     save_ledger(run_dir, units, candidates)
     c.emit({
         "units": len(units),
@@ -1455,7 +1469,9 @@ RERUN_RATE = 0.15
 
 
 def is_fresh(u: dict) -> bool:
-    return u.get("prior_status") in (None, "none", "new")
+    # A unit a prior run deferred or set aside was never hunted: it yields
+    # like a new one (review of cut 10).
+    return u.get("prior_status") in (None, "none", "new", "prior_deferred", "prior_out_of_scope")
 
 
 def estimate_numbers(meta: dict, units: list, candidates: dict) -> dict:
@@ -1584,6 +1600,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         "blocked": [{"coverage_id": u["coverage_id"], "unresolved": u["unresolved"]} for u in units if u["status"] == "blocked"],
         "suppressed": [r["fingerprint"] for r in candidates["suppressed"]],
         "unlinked_prior": [r["fingerprint"] for r in candidates["unlinked_prior"]],
+        "accepted_prior": [r["fingerprint"] for r in candidates["accepted_prior"]],
         "merged": [{"fingerprint": m["fingerprint"], "into": m["into"]} for m in candidates["merged"]],
     })
 

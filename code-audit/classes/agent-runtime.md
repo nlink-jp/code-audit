@@ -175,8 +175,10 @@ The string the human approves is the control. Is it built by the helper that
 abbreviates an event line — per-argument clipping, a joined string under one
 limit, `%v` formatting — so that a long command puts its effect past what the
 operator sees? Covered when the gate renders every argument, keeps the end of
-each value, puts short values before long ones, marks what it omits, and
-promises no more than that: no layout can prove which row is which.
+each value, puts short values before long ones, expands tabs before wrapping,
+shows non-string values as JSON (not `%v`), states on the first line what it
+omitted, and promises no more than that: no layout can prove which row is
+which.
 
 ## Lane-writable directory reused on resume
 Source: security.md#A directory a sandboxed lane can write and a resume reuses must be refused if it has become a link

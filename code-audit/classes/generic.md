@@ -55,8 +55,10 @@ not the grandchild holding the pipes; reads, writes and recursion with no
 bound when the input is caller-controlled, and work that grows faster than
 the input (a tree builder quadratic on some HTML). Covered when the check and the
 open are one operation on one file identity, places are compared by
-identity, cleanup deletes only what an exclusive create recorded, and limits
-reach the whole process group.
+identity, cleanup deletes only what an exclusive create recorded, limits
+reach the whole process group, and attacker input is cut to a measured size
+before a parser whose work can grow faster than its input (a failed parse is
+"no tree", recorded in the result).
 
 ## Cryptography and secrets
 Source: origin:ATTACK-CLASSES.md#Cryptography and secrets, security.md#Go's `url.Error` quotes the whole URL — a config validation error can leak a credential, security.md#An upstream API's error message can quote the credential you sent — build your own error text, security.md#A credential may follow a redirect only within the domain the request started in, security.md#A diagnostic dump is a superset of what it captures — derive its modes from the most protected thing inside, security.md#Remove your own namespace from children rather than keeping it — invert the prefix rule, and grep the org before calling a namespace yours, security.md#Never embed absolute paths in shareable artifacts' metadata, security.md#When the credential is more powerful than the use, put the restraint in the client
